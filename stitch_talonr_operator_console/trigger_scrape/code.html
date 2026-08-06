@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Talonr - Trigger Scrape</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "primary": "#d97706",
+                        "primary-fixed-dim": "#d97706",
+                        "on-primary": "#ffffff",
+                        "background": "#09090b",
+                        "on-background": "#f4f4f5",
+                        "surface": "#18181b",
+                        "on-surface": "#f4f4f5",
+                        "on-surface-variant": "#a1a1aa",
+                        "outline-variant": "#27272a",
+                        "surface-container-lowest": "#09090b",
+                        "surface-container-low": "#18181b",
+                        "surface-container-highest": "#27272a",
+                        "tertiary": "#3b82f6",
+                        "tertiary-fixed": "#3b82f6",
+                        "tertiary-fixed-dim": "#60a5fa",
+                        "tertiary-container": "#1e3a8a",
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "gutter": "1rem",
+                        "sidebar-width": "240px",
+                        "container-margin": "1.5rem",
+                        "cell-padding-y": "0.5rem",
+                        "cell-padding-x": "0.75rem"
+                    },
+                    "fontFamily": {
+                        "display": ["Geist"],
+                        "body-sm": ["Geist"],
+                        "headline": ["Geist"],
+                        "data-label": ["JetBrains Mono"],
+                        "body-base": ["Geist"],
+                        "data-mono": ["JetBrains Mono"]
+                    },
+                    "fontSize": {
+                        "display": ["24px", { "lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+                        "body-sm": ["13px", { "lineHeight": "18px", "fontWeight": "400" }],
+                        "headline": ["18px", { "lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "data-label": ["11px", { "lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500" }],
+                        "body-base": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
+                        "data-mono": ["13px", { "lineHeight": "18px", "fontWeight": "450" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-base min-h-screen flex antialiased selection:bg-primary selection:text-on-primary">
+<!-- SideNavBar -->
+<aside class="hidden md:flex w-[240px] h-screen sticky left-0 top-0 bg-surface border-r border-outline-variant flex-col py-gutter px-4 z-40">
+<div class="flex items-center mb-8 gap-2">
+<span class="material-symbols-outlined text-primary" style="font-variation-settings: 'FILL' 1;">explore</span>
+<div>
+<div class="font-display text-display text-primary tracking-tight">Talonr</div>
+<div class="font-data-label text-data-label text-on-surface-variant uppercase">Lead Intelligence</div>
+</div>
+</div>
+<button class="w-full bg-primary hover:bg-primary/90 text-on-primary font-data-label text-data-label py-2 px-4 rounded flex items-center justify-center gap-2 mb-8 transition-colors active:scale-95 shadow-[0_0_0_1px_rgba(255,255,255,0.1)_inset]">
+<span class="material-symbols-outlined text-sm">add</span>
+            New Scrape
+        </button>
+<nav class="flex-1 flex flex-col gap-1">
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant hover:bg-surface-container-highest transition-colors cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span>Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant hover:bg-surface-container-highest transition-colors cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined">account_circle</span>
+<span>X Accounts</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded bg-surface-container-highest text-primary border-r-2 border-primary font-bold cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">travel_explore</span>
+<span>Scrapes</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant hover:bg-surface-container-highest transition-colors cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined">person_search</span>
+<span>Leads</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant hover:bg-surface-container-highest transition-colors cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined">list_alt</span>
+<span>Lead Lists</span>
+</a>
+</nav>
+<div class="mt-auto pt-4 border-t border-outline-variant flex flex-col gap-1">
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant hover:bg-surface-container-highest transition-colors cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined">admin_panel_settings</span>
+<span class="font-data-label text-data-label">Admin Settings</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant hover:bg-surface-container-highest transition-colors cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined">query_stats</span>
+<span class="font-data-label text-data-label">System Health</span>
+<span class="ml-auto w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></span>
+</a>
+</div>
+</aside>
+<div class="flex-1 flex flex-col min-w-0">
+<!-- TopNavBar (Mobile only for Nav, kept for Search/Profile on Desktop) -->
+<header class="md:hidden flex justify-between items-center h-14 px-gutter w-full sticky top-0 z-50 bg-surface border-b border-outline-variant">
+<div class="font-headline text-headline text-on-surface tracking-tight">Talonr</div>
+<div class="flex items-center gap-4">
+<button class="text-on-surface-variant hover:text-on-surface transition-colors">
+<span class="material-symbols-outlined">menu</span>
+</button>
+</div>
+</header>
+<main class="flex-1 p-container-margin overflow-y-auto">
+<div class="max-w-3xl mx-auto">
+<!-- Page Header -->
+<div class="mb-8 flex items-center justify-between">
+<div>
+<h1 class="font-display text-display text-on-background mb-1">Trigger Scrape</h1>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Configure parameters to initiate a new data extraction routine.</p>
+</div>
+</div>
+<!-- Form Container -->
+<div class="bg-surface border border-outline-variant rounded shadow-sm relative overflow-hidden">
+<!-- Decorative Top Border -->
+<div class="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-primary to-primary-fixed-dim"></div>
+<form class="p-6 space-y-8">
+<!-- Account Selection -->
+<div class="space-y-2">
+<label class="font-data-label text-data-label text-on-surface-variant uppercase block">Executor Account</label>
+<div class="relative">
+<select class="w-full bg-surface-container-lowest border border-outline-variant text-on-surface font-data-mono text-data-mono rounded px-3 py-2 appearance-none focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors">
+<option value="acc_1">@talonr_bot_01 (Active)</option>
+<option value="acc_2">@talonr_bot_02 (Active)</option>
+<option value="acc_3">@talonr_bot_03 (Active)</option>
+</select>
+<span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant pointer-events-none text-sm">expand_more</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">Only active, un-restricted accounts are available for execution.</p>
+</div>
+<hr class="border-outline-variant"/>
+<!-- Source Type -->
+<div class="space-y-3">
+<label class="font-data-label text-data-label text-on-surface-variant uppercase block">Source Type</label>
+<div class="flex gap-2 p-1 bg-surface-container-lowest border border-outline-variant rounded">
+<label class="flex-1 cursor-pointer">
+<input checked="" class="peer sr-only" name="source_type" type="radio" value="search"/>
+<div class="text-center py-2 px-3 rounded font-body-sm text-body-sm text-on-surface-variant peer-checked:bg-surface-container-highest peer-checked:text-on-surface peer-checked:shadow-sm transition-all border border-transparent peer-checked:border-outline-variant">
+                                        Search Query
+                                    </div>
+</label>
+<label class="flex-1 cursor-pointer">
+<input class="peer sr-only" name="source_type" type="radio" value="followers"/>
+<div class="text-center py-2 px-3 rounded font-body-sm text-body-sm text-on-surface-variant peer-checked:bg-surface-container-highest peer-checked:text-on-surface peer-checked:shadow-sm transition-all border border-transparent peer-checked:border-outline-variant">
+                                        Followers
+                                    </div>
+</label>
+<label class="flex-1 cursor-pointer">
+<input class="peer sr-only" name="source_type" type="radio" value="likers"/>
+<div class="text-center py-2 px-3 rounded font-body-sm text-body-sm text-on-surface-variant peer-checked:bg-surface-container-highest peer-checked:text-on-surface peer-checked:shadow-sm transition-all border border-transparent peer-checked:border-outline-variant">
+                                        Tweet Likers
+                                    </div>
+</label>
+</div>
+</div>
+<!-- Source Reference Input -->
+<div class="space-y-2">
+<label class="font-data-label text-data-label text-on-surface-variant uppercase block" id="source_ref_label">Search Query</label>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm">search</span>
+<input class="w-full bg-surface-container-lowest border border-outline-variant text-on-surface font-data-mono text-data-mono rounded pl-9 pr-3 py-2 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors placeholder:text-on-surface-variant/50" placeholder="e.g. 'founder OR CEO' filter:verified" type="text"/>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">Supports standard X advanced search operators.</p>
+</div>
+<hr class="border-outline-variant"/>
+<!-- Lead Cap -->
+<div class="space-y-2">
+<label class="font-data-label text-data-label text-on-surface-variant uppercase block">Lead Extraction Cap</label>
+<div class="flex items-center gap-4">
+<input class="flex-1 accent-primary h-1 bg-surface-container-highest rounded-full appearance-none cursor-pointer" max="1000" min="10" step="10" type="range" value="150"/>
+<div class="relative w-24">
+<input class="w-full bg-surface-container-lowest border border-outline-variant text-on-surface font-data-mono text-data-mono text-right rounded pl-3 pr-8 py-1.5 focus:outline-none focus:border-primary transition-colors" type="number" value="150"/>
+<span class="absolute right-3 top-1/2 -translate-y-1/2 font-data-label text-data-label text-on-surface-variant">MAX</span>
+</div>
+</div>
+</div>
+<!-- Submit Area -->
+<div class="pt-6 mt-6 border-t border-outline-variant flex justify-end gap-3">
+<button class="px-4 py-2 border border-outline-variant text-on-surface font-data-label text-data-label rounded hover:bg-surface-container-highest transition-colors" type="button">
+                                Cancel
+                            </button>
+<button class="px-6 py-2 bg-primary hover:bg-primary/90 text-on-primary font-data-label text-data-label rounded flex items-center gap-2 transition-colors active:scale-95 shadow-[0_0_0_1px_rgba(255,255,255,0.1)_inset]" type="submit">
+<span class="material-symbols-outlined text-sm">rocket_launch</span>
+                                Start Scrape
+                            </button>
+</div>
+</form>
+</div>
+<!-- Guidance / Info Card -->
+<div class="mt-6 p-4 bg-tertiary-container/10 border border-tertiary-fixed-dim/30 rounded flex gap-4">
+<span class="material-symbols-outlined text-tertiary-fixed-dim">info</span>
+<div>
+<h4 class="font-headline text-body-base font-semibold text-tertiary-fixed-dim mb-1">Rate Limit Advisory</h4>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Scraping 'Followers' on active accounts is currently subject to stricter rate limits. Consider capping extraction below 200 per session to maintain account health.</p>
+</div>
+</div>
+</div>
+</main>
+</div>
+<script>
+        // Simple script to change label based on segmented control
+        document.addEventListener('DOMContentLoaded', () => {
+            const radioButtons = document.querySelectorAll('input[name="source_type"]');
+            const label = document.getElementById('source_ref_label');
+            const input = document.querySelector('input[placeholder^="e.g."]');
+
+            const config = {
+                'search': { label: 'Search Query', placeholder: "e.g. 'founder OR CEO' filter:verified", icon: 'search' },
+                'followers': { label: 'Target Account Handle', placeholder: "e.g. @elonmusk", icon: 'alternate_email' },
+                'likers': { label: 'Target Tweet URL', placeholder: "e.g. https://x.com/user/status/123...", icon: 'link' }
+            };
+
+            radioButtons.forEach(radio => {
+                radio.addEventListener('change', (e) => {
+                    const selected = e.target.value;
+                    if(config[selected]) {
+                        label.textContent = config[selected].label;
+                        input.placeholder = config[selected].placeholder;
+                        input.previousElementSibling.textContent = config[selected].icon;
+                    }
+                });
+            });
+        });
+    </script>
+</body></html>

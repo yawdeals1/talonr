@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Talonr - Admin Users</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600&amp;family=JetBrains+Mono:wght@450;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          theme: {
+            extend: {
+              "colors": {
+                      "error-container": "#ffdad6",
+                      "primary-fixed": "#ffdcc3",
+                      "surface-bright": "#fcf8fb",
+                      "primary-container": "#b15f00",
+                      "primary-fixed-dim": "#ffb77d",
+                      "surface-container-high": "#eae7ea",
+                      "secondary": "#5d5e66",
+                      "on-error-container": "#93000a",
+                      "inverse-surface": "#313032",
+                      "secondary-fixed-dim": "#c6c5cf",
+                      "tertiary-container": "#007abd",
+                      "inverse-primary": "#ffb77d",
+                      "tertiary-fixed": "#cee5ff",
+                      "on-surface-variant": "#554336",
+                      "surface-dim": "#dcd9dc",
+                      "on-secondary-fixed": "#1a1b22",
+                      "tertiary-fixed-dim": "#96ccff",
+                      "on-tertiary-container": "#fdfcff",
+                      "on-primary-container": "#fffbff",
+                      "on-surface": "#1c1b1d",
+                      "on-error": "#ffffff",
+                      "on-secondary-fixed-variant": "#46464e",
+                      "surface-container": "#f0edf0",
+                      "on-secondary-container": "#63646c",
+                      "outline-variant": "#dbc2b0",
+                      "on-primary": "#ffffff",
+                      "surface": "#fcf8fb",
+                      "surface-container-lowest": "#ffffff",
+                      "secondary-fixed": "#e3e1ec",
+                      "background": "#fcf8fb",
+                      "surface-container-highest": "#e5e1e4",
+                      "on-tertiary-fixed": "#001d32",
+                      "on-secondary": "#ffffff",
+                      "surface-tint": "#904d00",
+                      "primary": "#8d4b00",
+                      "on-tertiary-fixed-variant": "#004a75",
+                      "inverse-on-surface": "#f3f0f2",
+                      "error": "#ba1a1a",
+                      "outline": "#887364",
+                      "surface-variant": "#e5e1e4",
+                      "tertiary": "#006096",
+                      "on-background": "#1c1b1d",
+                      "secondary-container": "#e3e1ec",
+                      "surface-container-low": "#f6f2f5",
+                      "on-tertiary": "#ffffff",
+                      "on-primary-fixed-variant": "#6e3900",
+                      "on-primary-fixed": "#2f1500"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.125rem",
+                      "lg": "0.25rem",
+                      "xl": "0.5rem",
+                      "full": "0.75rem"
+              },
+              "spacing": {
+                      "gutter": "1rem",
+                      "sidebar-width": "240px",
+                      "container-margin": "1.5rem",
+                      "cell-padding-y": "0.5rem",
+                      "cell-padding-x": "0.75rem"
+              },
+              "fontFamily": {
+                      "display": [
+                              "Geist"
+                      ],
+                      "body-sm": [
+                              "Geist"
+                      ],
+                      "headline": [
+                              "Geist"
+                      ],
+                      "data-label": [
+                              "JetBrains Mono"
+                      ],
+                      "body-base": [
+                              "Geist"
+                      ],
+                      "data-mono": [
+                              "JetBrains Mono"
+                      ]
+              },
+              "fontSize": {
+                      "display": [
+                              "24px",
+                              {
+                                      "lineHeight": "32px",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "body-sm": [
+                              "13px",
+                              {
+                                      "lineHeight": "18px",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "headline": [
+                              "18px",
+                              {
+                                      "lineHeight": "24px",
+                                      "letterSpacing": "-0.01em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "data-label": [
+                              "11px",
+                              {
+                                      "lineHeight": "16px",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "body-base": [
+                              "14px",
+                              {
+                                      "lineHeight": "20px",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "data-mono": [
+                              "13px",
+                              {
+                                      "lineHeight": "18px",
+                                      "fontWeight": "450"
+                              }
+                      ]
+              }
+      },
+          },
+        }
+    </script>
+<style>
+        /* Custom scrollbar for data tables */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background-color: #d4d4d8; /* zinc-300 */
+            border-radius: 4px;
+        }
+        
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            background-color: rgba(22, 163, 74, 0.1); /* fallback */
+            border: 1px solid rgba(22, 163, 74, 0.2);
+        }
+        .status-pill.admin {
+            background-color: rgba(185, 28, 28, 0.1);
+            border-color: rgba(185, 28, 28, 0.2);
+            color: #b91c1c; /* red-700 */
+        }
+        .status-pill.user {
+            background-color: rgba(2, 132, 199, 0.1); /* sky-600 */
+            border-color: rgba(2, 132, 199, 0.2);
+            color: #0284c7; /* sky-600 */
+        }
+    </style>
+</head>
+<body class="bg-zinc-50 text-zinc-900 font-body-base text-body-base min-h-screen flex antialiased">
+<!-- SideNavBar -->
+<nav class="hidden md:flex flex-col h-screen py-gutter px-4 bg-white border-r border-zinc-200 w-[240px] sticky left-0 top-0 z-40">
+<!-- Header -->
+<div class="mb-8 px-2">
+<h1 class="font-display text-display text-amber-600">Talonr</h1>
+<p class="font-data-label text-data-label text-zinc-500 mt-1">Lead Intelligence</p>
+</div>
+<!-- CTA -->
+<button class="mb-6 w-full bg-amber-600 text-white rounded py-2 px-4 font-body-sm text-body-sm font-semibold shadow-sm hover:brightness-110 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95">
+<span class="material-symbols-outlined" style="font-size: 18px;">add</span>
+            New Scrape
+        </button>
+<!-- Main Tabs -->
+<div class="flex-1 overflow-y-auto">
+<ul class="space-y-1">
+<li>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-600 hover:bg-zinc-100 transition-colors cursor-pointer active:scale-95 group" href="#">
+<span class="material-symbols-outlined group-hover:text-zinc-900" style="font-size: 20px;">dashboard</span>
+<span class="font-body-sm text-body-sm group-hover:text-zinc-900">Dashboard</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-600 hover:bg-zinc-100 transition-colors cursor-pointer active:scale-95 group" href="#">
+<span class="material-symbols-outlined group-hover:text-zinc-900" style="font-size: 20px;">account_circle</span>
+<span class="font-body-sm text-body-sm group-hover:text-zinc-900">X Accounts</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-600 hover:bg-zinc-100 transition-colors cursor-pointer active:scale-95 group" href="#">
+<span class="material-symbols-outlined group-hover:text-zinc-900" style="font-size: 20px;">travel_explore</span>
+<span class="font-body-sm text-body-sm group-hover:text-zinc-900">Scrapes</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-600 hover:bg-zinc-100 transition-colors cursor-pointer active:scale-95 group" href="#">
+<span class="material-symbols-outlined group-hover:text-zinc-900" style="font-size: 20px;">person_search</span>
+<span class="font-body-sm text-body-sm group-hover:text-zinc-900">Leads</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-600 hover:bg-zinc-100 transition-colors cursor-pointer active:scale-95 group" href="#">
+<span class="material-symbols-outlined group-hover:text-zinc-900" style="font-size: 20px;">list_alt</span>
+<span class="font-body-sm text-body-sm group-hover:text-zinc-900">Lead Lists</span>
+</a>
+</li>
+</ul>
+</div>
+<!-- Footer Tabs -->
+<div class="pt-4 mt-4 border-t border-zinc-200">
+<ul class="space-y-1">
+<li>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-amber-600 border-r-2 border-amber-600 font-bold bg-amber-50 transition-colors cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined" data-weight="fill" style="font-size: 20px;">admin_panel_settings</span>
+<span class="font-body-sm text-body-sm">Admin Settings</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-600 hover:bg-zinc-100 transition-colors cursor-pointer active:scale-95 group" href="#">
+<span class="material-symbols-outlined group-hover:text-zinc-900" style="font-size: 20px;">query_stats</span>
+<span class="font-body-sm text-body-sm group-hover:text-zinc-900">System Health</span>
+</a>
+</li>
+</ul>
+</div>
+</nav>
+<!-- Main Content Area -->
+<div class="flex-1 flex flex-col min-w-0">
+<!-- TopNavBar -->
+<header class="flex justify-between items-center h-14 px-gutter w-full sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-zinc-200 transition-all duration-200">
+<!-- Mobile Menu & Brand -->
+<div class="flex items-center gap-4 md:hidden">
+<button class="text-zinc-500 hover:text-amber-600 p-1">
+<span class="material-symbols-outlined">menu</span>
+</button>
+<span class="font-headline text-headline text-zinc-900 font-bold tracking-tight">Talonr</span>
+</div>
+<!-- Empty space on desktop left to balance right side -->
+<div class="hidden md:block flex-1">
+<!-- Search could go here if needed, omitted for minimalism based on prompt -->
+<h2 class="font-headline text-headline font-bold text-zinc-900">Admin / Users</h2>
+</div>
+<!-- Right Actions -->
+<div class="flex items-center gap-3 md:gap-5">
+<div class="hidden sm:flex items-center gap-2">
+<span class="px-2 py-1 rounded bg-amber-50 border border-amber-200 text-amber-700 font-data-label text-data-label flex items-center gap-1">
+<span class="material-symbols-outlined" style="font-size: 14px;">verified_user</span>
+                        Admin
+                    </span>
+</div>
+<div class="flex items-center gap-2 text-zinc-500">
+<button class="p-1.5 rounded-full hover:bg-zinc-100 transition-colors">
+<span class="material-symbols-outlined" style="font-size: 20px;">notifications</span>
+</button>
+<button class="p-1.5 rounded-full hover:bg-zinc-100 transition-colors hidden sm:block">
+<span class="material-symbols-outlined" style="font-size: 20px;">help_outline</span>
+</button>
+</div>
+<div class="h-6 w-px bg-zinc-200 mx-1 hidden sm:block"></div>
+<div class="flex items-center gap-3">
+<button class="text-zinc-500 hover:text-amber-600 font-body-sm text-body-sm font-medium transition-colors hidden sm:block">
+                        Logout
+                    </button>
+<div class="w-8 h-8 rounded-full bg-zinc-100 border border-zinc-200 overflow-hidden shrink-0">
+<img class="w-full h-full object-cover" data-alt="A minimalist, high-contrast digital avatar featuring a simple geometric shape in neon orange against a deep, dark grey background. The style is strictly flat, vector-based, and highly corporate-tech. Clean lines, no shadows, no complex gradients. The aesthetic represents a modern developer or sysadmin profile in a dark-mode UI environment." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCAcQdw1n2LhbdbYLtohRNYPIb-0NYFXfy-EeAkSQwsGESAXD6kRRjKYisZUnguIKKAJTuZCB2zDsCsjW_FLFQBJQOvtRVTEzNRs2_7SwTI720zgRtn40oNXZdpjufKUe675H1e-J6KZIfn6R1LAFTHvNeGY4g7q7zjhjLi9r_84zOjTZOY4aIoKli3_bMSBGzvIz4-836WMrparUx0G_T8-68RbtAcZ5r8-fORlf8clqTc-Ip8W9RO"/>
+</div>
+</div>
+</div>
+</header>
+<!-- Canvas / Content -->
+<main class="flex-1 p-container-margin overflow-y-auto bg-zinc-50">
+<div class="max-w-6xl mx-auto w-full">
+<!-- Page Header / Controls -->
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+<div>
+<h3 class="font-headline text-[20px] font-semibold text-zinc-900">User Management</h3>
+<p class="font-body-sm text-body-sm text-zinc-500 mt-1">Read-only view of all system accounts.</p>
+</div>
+<!-- Search/Filter -->
+<div class="relative w-full sm:w-64">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" style="font-size: 18px;">search</span>
+<input class="w-full bg-white border border-zinc-300 rounded pl-9 pr-3 py-1.5 font-data-mono text-data-mono text-zinc-900 focus:outline-none focus:border-amber-600 focus:ring-1 focus:ring-amber-600 transition-colors placeholder:text-zinc-400 shadow-sm" placeholder="Filter by email..." type="text"/>
+</div>
+</div>
+<!-- Data Table Container -->
+<div class="bg-white rounded border border-zinc-200 overflow-hidden shadow-sm">
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="border-b border-zinc-200 bg-zinc-50">
+<th class="py-3 px-4 font-data-label text-data-label text-zinc-500 uppercase tracking-wider font-semibold w-1/2">Email Address</th>
+<th class="py-3 px-4 font-data-label text-data-label text-zinc-500 uppercase tracking-wider font-semibold w-1/4">Role</th>
+<th class="py-3 px-4 font-data-label text-data-label text-zinc-500 uppercase tracking-wider font-semibold w-1/4">Created Date</th>
+<th class="py-3 px-4 w-12"></th>
+</tr>
+</thead>
+<tbody class="font-data-mono text-data-mono text-zinc-700 divide-y divide-zinc-100">
+<tr class="hover:bg-zinc-50 transition-colors group">
+<td class="py-2 px-4 truncate max-w-xs text-zinc-900">alex.mercer@talonr.io</td>
+<td class="py-2 px-4">
+<span class="status-pill admin font-data-label">
+                                            Admin
+                                        </span>
+</td>
+<td class="py-2 px-4 text-zinc-500">2023-10-15 08:22:10</td>
+<td class="py-2 px-4 text-right">
+<button class="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-zinc-600 transition-all">
+<span class="material-symbols-outlined" style="font-size: 18px;">more_vert</span>
+</button>
+</td>
+</tr>
+<tr class="hover:bg-zinc-50 transition-colors group">
+<td class="py-2 px-4 truncate max-w-xs text-zinc-900">j.doe@example.com</td>
+<td class="py-2 px-4">
+<span class="status-pill user font-data-label">
+                                            User
+                                        </span>
+</td>
+<td class="py-2 px-4 text-zinc-500">2023-10-18 14:05:45</td>
+<td class="py-2 px-4 text-right">
+<button class="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-zinc-600 transition-all">
+<span class="material-symbols-outlined" style="font-size: 18px;">more_vert</span>
+</button>
+</td>
+</tr>
+<tr class="hover:bg-zinc-50 transition-colors group">
+<td class="py-2 px-4 truncate max-w-xs text-zinc-900">sarah.connor@sky.net</td>
+<td class="py-2 px-4">
+<span class="status-pill user font-data-label">
+                                            User
+                                        </span>
+</td>
+<td class="py-2 px-4 text-zinc-500">2023-11-02 09:11:03</td>
+<td class="py-2 px-4 text-right">
+<button class="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-zinc-600 transition-all">
+<span class="material-symbols-outlined" style="font-size: 18px;">more_vert</span>
+</button>
+</td>
+</tr>
+<tr class="hover:bg-zinc-50 transition-colors group">
+<td class="py-2 px-4 truncate max-w-xs text-zinc-900">m.smith@matrix.corp</td>
+<td class="py-2 px-4">
+<span class="status-pill admin font-data-label">
+                                            Admin
+                                        </span>
+</td>
+<td class="py-2 px-4 text-zinc-500">2023-11-15 16:44:22</td>
+<td class="py-2 px-4 text-right">
+<button class="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-zinc-600 transition-all">
+<span class="material-symbols-outlined" style="font-size: 18px;">more_vert</span>
+</button>
+</td>
+</tr>
+<tr class="hover:bg-zinc-50 transition-colors group">
+<td class="py-2 px-4 truncate max-w-xs text-zinc-900">n.tesla@wardenclyffe.com</td>
+<td class="py-2 px-4">
+<span class="status-pill user font-data-label">
+                                            User
+                                        </span>
+</td>
+<td class="py-2 px-4 text-zinc-500">2023-12-01 11:30:00</td>
+<td class="py-2 px-4 text-right">
+<button class="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-zinc-600 transition-all">
+<span class="material-symbols-outlined" style="font-size: 18px;">more_vert</span>
+</button>
+</td>
+</tr>
+<tr class="hover:bg-zinc-50 transition-colors group">
+<td class="py-2 px-4 truncate max-w-xs text-zinc-900">guest_9934@temp.org</td>
+<td class="py-2 px-4">
+<span class="status-pill user font-data-label">
+                                            User
+                                        </span>
+</td>
+<td class="py-2 px-4 text-zinc-500">2023-12-05 22:15:11</td>
+<td class="py-2 px-4 text-right">
+<button class="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-zinc-600 transition-all">
+<span class="material-symbols-outlined" style="font-size: 18px;">more_vert</span>
+</button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Pagination Footer -->
+<div class="border-t border-zinc-200 bg-zinc-50 px-4 py-3 flex items-center justify-between">
+<span class="font-data-label text-data-label text-zinc-500">Showing 1-6 of 142 users</span>
+<div class="flex items-center gap-1">
+<button class="p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 disabled:opacity-50 disabled:cursor-not-allowed" disabled="">
+<span class="material-symbols-outlined" style="font-size: 18px;">chevron_left</span>
+</button>
+<button class="p-1 rounded text-zinc-500 hover:text-zinc-600 hover:bg-zinc-200">
+<span class="material-symbols-outlined" style="font-size: 18px;">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+</body></html>

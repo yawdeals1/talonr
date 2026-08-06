@@ -1,0 +1,7 @@
+node_modules
+dist
+.git
+.env
+.env.local
+*.log
+stitch_talonr_operator_console

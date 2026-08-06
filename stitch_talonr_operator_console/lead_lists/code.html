@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Lead Lists - Talonr</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600&amp;family=JetBrains+Mono:wght@450;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "error-container": "#ffdad6",
+                      "primary-fixed": "#ffdcc3",
+                      "surface-bright": "#fcf8fb",
+                      "primary-container": "#b15f00",
+                      "primary-fixed-dim": "#ffb77d",
+                      "surface-container-high": "#eae7ea",
+                      "secondary": "#5d5e66",
+                      "on-error-container": "#93000a",
+                      "inverse-surface": "#313032",
+                      "secondary-fixed-dim": "#c6c5cf",
+                      "tertiary-container": "#007abd",
+                      "inverse-primary": "#ffb77d",
+                      "tertiary-fixed": "#cee5ff",
+                      "on-surface-variant": "#554336",
+                      "surface-dim": "#dcd9dc",
+                      "on-secondary-fixed": "#1a1b22",
+                      "tertiary-fixed-dim": "#96ccff",
+                      "on-tertiary-container": "#fdfcff",
+                      "on-primary-container": "#fffbff",
+                      "on-surface": "#1c1b1d",
+                      "on-error": "#ffffff",
+                      "on-secondary-fixed-variant": "#46464e",
+                      "surface-container": "#f0edf0",
+                      "on-secondary-container": "#63646c",
+                      "outline-variant": "#dbc2b0",
+                      "on-primary": "#ffffff",
+                      "surface": "#fcf8fb",
+                      "surface-container-lowest": "#ffffff",
+                      "secondary-fixed": "#e3e1ec",
+                      "background": "#fcf8fb",
+                      "surface-container-highest": "#e5e1e4",
+                      "on-tertiary-fixed": "#001d32",
+                      "on-secondary": "#ffffff",
+                      "surface-tint": "#904d00",
+                      "primary": "#8d4b00",
+                      "on-tertiary-fixed-variant": "#004a75",
+                      "inverse-on-surface": "#f3f0f2",
+                      "error": "#ba1a1a",
+                      "outline": "#887364",
+                      "surface-variant": "#e5e1e4",
+                      "tertiary": "#006096",
+                      "on-background": "#1c1b1d",
+                      "secondary-container": "#e3e1ec",
+                      "surface-container-low": "#f6f2f5",
+                      "on-tertiary": "#ffffff",
+                      "on-primary-fixed-variant": "#6e3900",
+                      "on-primary-fixed": "#2f1500"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.125rem",
+                      "lg": "0.25rem",
+                      "xl": "0.5rem",
+                      "full": "0.75rem"
+              },
+              "spacing": {
+                      "gutter": "1rem",
+                      "sidebar-width": "240px",
+                      "container-margin": "1.5rem",
+                      "cell-padding-y": "0.5rem",
+                      "cell-padding-x": "0.75rem"
+              },
+              "fontFamily": {
+                      "display": [
+                              "Geist"
+                      ],
+                      "body-sm": [
+                              "Geist"
+                      ],
+                      "headline": [
+                              "Geist"
+                      ],
+                      "data-label": [
+                              "JetBrains Mono"
+                      ],
+                      "body-base": [
+                              "Geist"
+                      ],
+                      "data-mono": [
+                              "JetBrains Mono"
+                      ]
+              },
+              "fontSize": {
+                      "display": [
+                              "24px",
+                              {
+                                      "lineHeight": "32px",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "body-sm": [
+                              "13px",
+                              {
+                                      "lineHeight": "18px",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "headline": [
+                              "18px",
+                              {
+                                      "lineHeight": "24px",
+                                      "letterSpacing": "-0.01em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "data-label": [
+                              "11px",
+                              {
+                                      "lineHeight": "16px",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "body-base": [
+                              "14px",
+                              {
+                                      "lineHeight": "20px",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "data-mono": [
+                              "13px",
+                              {
+                                      "lineHeight": "18px",
+                                      "fontWeight": "450"
+                              }
+                      ]
+              }
+            },
+          }
+        }
+      </script>
+</head>
+<body class="bg-zinc-950 text-zinc-50 font-body-base antialiased flex h-screen overflow-hidden selection:bg-amber-600/30 selection:text-amber-200">
+<!-- Sidebar Component -->
+<aside class="w-[240px] h-screen sticky left-0 top-0 border-r border-zinc-800 bg-zinc-950 flex flex-col py-gutter px-4 z-40 hidden md:flex shrink-0">
+<!-- Brand -->
+<div class="mb-8 px-2 flex items-center gap-3">
+<div class="w-8 h-8 rounded bg-amber-600 flex items-center justify-center">
+<span class="material-symbols-outlined text-white" style="font-variation-settings: 'FILL' 1;">dataset</span>
+</div>
+<div>
+<h1 class="font-display text-display text-white">Talonr</h1>
+<p class="font-body-sm text-body-sm text-zinc-400">Lead Intelligence</p>
+</div>
+</div>
+<!-- CTA -->
+<button class="w-full bg-amber-600 hover:bg-amber-500 text-white font-body-base text-body-base py-2 px-4 rounded mb-8 transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">add</span>
+            New Scrape
+        </button>
+<!-- Main Nav -->
+<nav class="flex-1 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-400 hover:bg-zinc-900 transition-colors cursor-pointer active:scale-95 text-on-surface-variant dark:text-on-secondary-fixed-variant" href="#">
+<span class="material-symbols-outlined text-[20px]">dashboard</span>
+<span class="font-body-base text-body-base">Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-400 hover:bg-zinc-900 transition-colors cursor-pointer active:scale-95 text-on-surface-variant dark:text-on-secondary-fixed-variant" href="#">
+<span class="material-symbols-outlined text-[20px]">account_circle</span>
+<span class="font-body-base text-body-base">X Accounts</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-400 hover:bg-zinc-900 transition-colors cursor-pointer active:scale-95 text-on-surface-variant dark:text-on-secondary-fixed-variant" href="#">
+<span class="material-symbols-outlined text-[20px]">travel_explore</span>
+<span class="font-body-base text-body-base">Scrapes</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-400 hover:bg-zinc-900 transition-colors cursor-pointer active:scale-95 text-on-surface-variant dark:text-on-secondary-fixed-variant" href="#">
+<span class="material-symbols-outlined text-[20px]">person_search</span>
+<span class="font-body-base text-body-base">Leads</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded bg-zinc-900/50 text-amber-500 border-r-2 border-amber-500 font-bold cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined text-[20px]" style="font-variation-settings: 'FILL' 1;">list_alt</span>
+<span class="font-body-base text-body-base">Lead Lists</span>
+</a>
+</nav>
+<!-- Footer Nav -->
+<div class="mt-auto pt-4 border-t border-zinc-800 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-400 hover:bg-zinc-900 transition-colors cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined text-[20px]">admin_panel_settings</span>
+<span class="font-body-base text-body-base">Admin Settings</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-400 hover:bg-zinc-900 transition-colors cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined text-[20px]">query_stats</span>
+<span class="font-body-base text-body-base">System Health</span>
+</a>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col h-screen min-w-0 bg-zinc-950">
+<!-- Top Nav (Mobile mostly, but kept for structure) -->
+<header class="flex justify-between items-center h-14 px-gutter w-full sticky top-0 z-30 bg-zinc-950 border-b border-zinc-800 md:hidden">
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 rounded bg-amber-600 flex items-center justify-center">
+<span class="material-symbols-outlined text-white text-[14px]" style="font-variation-settings: 'FILL' 1;">dataset</span>
+</div>
+<span class="font-headline text-headline text-white">Talonr</span>
+</div>
+<div class="flex items-center gap-4">
+<button class="text-zinc-400 hover:text-white transition-colors">
+<span class="material-symbols-outlined">menu</span>
+</button>
+</div>
+</header>
+<!-- Page Content -->
+<div class="flex-1 overflow-auto p-container-margin flex flex-col xl:flex-row gap-6">
+<!-- Left Column: Lists Browser -->
+<div class="w-full xl:w-[400px] flex flex-col gap-4 shrink-0">
+<div class="flex items-center justify-between">
+<h2 class="font-headline text-headline text-zinc-50">Saved Lists</h2>
+<button class="w-8 h-8 rounded border border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white hover:border-zinc-700 transition-all">
+<span class="material-symbols-outlined text-[18px]">filter_list</span>
+</button>
+</div>
+<!-- List Cards Container -->
+<div class="flex flex-col gap-3 overflow-y-auto pr-2 custom-scrollbar">
+<!-- Card 1 (Active) -->
+<div class="p-4 rounded border border-amber-600 bg-zinc-900/50 cursor-pointer relative overflow-hidden group">
+<div class="absolute inset-0 bg-gradient-to-r from-amber-600/10 to-transparent pointer-events-none"></div>
+<div class="flex justify-between items-start mb-2 relative z-10">
+<h3 class="font-headline text-body-base font-semibold text-amber-500">Tech Founders (SF)</h3>
+<div class="bg-zinc-800 px-2 py-0.5 rounded font-data-mono text-data-mono text-zinc-300">
+                                1,240
+                            </div>
+</div>
+<div class="flex flex-wrap gap-2 relative z-10">
+<span class="bg-zinc-800/80 text-zinc-300 font-data-label text-data-label px-2 py-0.5 rounded border border-zinc-700">bio: founder|ceo</span>
+<span class="bg-zinc-800/80 text-zinc-300 font-data-label text-data-label px-2 py-0.5 rounded border border-zinc-700">loc: san francisco</span>
+<span class="bg-amber-900/20 text-amber-400 font-data-label text-data-label px-2 py-0.5 rounded border border-amber-900/50 flex items-center gap-1">
+<span class="material-symbols-outlined text-[12px]">verified</span> Verified Only
+                            </span>
+</div>
+</div>
+<!-- Card 2 -->
+<div class="p-4 rounded border border-zinc-800 bg-zinc-900 hover:border-zinc-700 cursor-pointer transition-all">
+<div class="flex justify-between items-start mb-2">
+<h3 class="font-headline text-body-base font-semibold text-zinc-100">AI Researchers</h3>
+<div class="bg-zinc-950 px-2 py-0.5 rounded font-data-mono text-data-mono text-zinc-400 border border-zinc-800">
+                                892
+                            </div>
+</div>
+<div class="flex flex-wrap gap-2">
+<span class="bg-zinc-950 text-zinc-400 font-data-label text-data-label px-2 py-0.5 rounded border border-zinc-800">bio: ai|machine learning</span>
+<span class="bg-zinc-950 text-zinc-400 font-data-label text-data-label px-2 py-0.5 rounded border border-zinc-800">min_followers: 5000</span>
+</div>
+</div>
+<!-- Card 3 -->
+<div class="p-4 rounded border border-zinc-800 bg-zinc-900 hover:border-zinc-700 cursor-pointer transition-all">
+<div class="flex justify-between items-start mb-2">
+<h3 class="font-headline text-body-base font-semibold text-zinc-100">Venture Capitalists</h3>
+<div class="bg-zinc-950 px-2 py-0.5 rounded font-data-mono text-data-mono text-zinc-400 border border-zinc-800">
+                                3,105
+                            </div>
+</div>
+<div class="flex flex-wrap gap-2">
+<span class="bg-zinc-950 text-zinc-400 font-data-label text-data-label px-2 py-0.5 rounded border border-zinc-800">bio: vc|partner|investor</span>
+<span class="bg-zinc-950 text-zinc-400 font-data-label text-data-label px-2 py-0.5 rounded border border-zinc-800">loc: ny|london</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Column: Editor & Results Table -->
+<div class="flex-1 flex flex-col min-w-0 border border-zinc-800 rounded bg-zinc-900/30 overflow-hidden">
+<!-- Filter Editor (Bento-style layout) -->
+<div class="p-6 border-b border-zinc-800 bg-zinc-900/50 flex flex-col gap-6">
+<div class="flex justify-between items-center">
+<h2 class="font-headline text-headline text-zinc-50 flex items-center gap-2">
+<span class="material-symbols-outlined text-amber-500">edit_note</span>
+                            Edit List: Tech Founders (SF)
+                        </h2>
+<div class="flex gap-2">
+<button class="px-3 py-1.5 rounded border border-zinc-700 text-zinc-300 font-body-sm text-body-sm hover:bg-zinc-800 transition-colors">Discard</button>
+<button class="px-3 py-1.5 rounded bg-amber-600 text-white font-body-sm text-body-sm hover:bg-amber-500 transition-colors">Save List</button>
+</div>
+</div>
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+<!-- Keywords Chip Input -->
+<div class="lg:col-span-8 flex flex-col gap-1.5">
+<label class="font-data-label text-data-label text-zinc-400 uppercase tracking-wider">Bio Keywords (Regex supported)</label>
+<div class="p-2 border border-zinc-800 bg-zinc-950 rounded flex flex-wrap gap-2 items-center min-h-[42px] focus-within:border-amber-600 transition-colors">
+<span class="bg-zinc-800 text-zinc-200 font-data-mono text-data-mono px-2 py-1 rounded flex items-center gap-1 group">
+                                    founder <span class="material-symbols-outlined text-[14px] cursor-pointer text-zinc-500 group-hover:text-red-400">close</span>
+</span>
+<span class="bg-zinc-800 text-zinc-200 font-data-mono text-data-mono px-2 py-1 rounded flex items-center gap-1 group">
+                                    ceo <span class="material-symbols-outlined text-[14px] cursor-pointer text-zinc-500 group-hover:text-red-400">close</span>
+</span>
+<input class="bg-transparent border-none focus:ring-0 text-zinc-100 font-data-mono text-data-mono p-0 flex-1 min-w-[120px] placeholder:text-zinc-600" placeholder="Add keyword..." type="text"/>
+</div>
+</div>
+<!-- Location -->
+<div class="lg:col-span-4 flex flex-col gap-1.5">
+<label class="font-data-label text-data-label text-zinc-400 uppercase tracking-wider">Location</label>
+<input class="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-zinc-100 font-data-mono text-data-mono focus:border-amber-600 focus:ring-1 focus:ring-amber-600/50 transition-colors h-[42px]" type="text" value="San Francisco|SF"/>
+</div>
+<!-- Followers Range -->
+<div class="lg:col-span-6 flex flex-col gap-1.5">
+<label class="font-data-label text-data-label text-zinc-400 uppercase tracking-wider">Followers Range</label>
+<div class="flex items-center gap-2">
+<div class="relative flex-1">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 font-data-mono text-[11px]">MIN</span>
+<input class="w-full bg-zinc-950 border border-zinc-800 rounded pl-10 pr-3 py-2 text-zinc-100 font-data-mono text-data-mono focus:border-amber-600 focus:ring-0 h-[42px]" type="number" value="1000"/>
+</div>
+<span class="text-zinc-600">-</span>
+<div class="relative flex-1">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 font-data-mono text-[11px]">MAX</span>
+<input class="w-full bg-zinc-950 border border-zinc-800 rounded pl-10 pr-3 py-2 text-zinc-100 font-data-mono text-data-mono focus:border-amber-600 focus:ring-0 h-[42px]" placeholder="Any" type="number"/>
+</div>
+</div>
+</div>
+<!-- Toggles & Status -->
+<div class="lg:col-span-6 flex items-center justify-between bg-zinc-950 border border-zinc-800 rounded px-4 h-[42px] self-end">
+<label class="flex items-center gap-2 cursor-pointer">
+<div class="relative">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-8 h-4 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-zinc-400 peer-checked:after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-amber-600"></div>
+</div>
+<span class="font-body-sm text-body-sm text-zinc-300">Verified Only</span>
+</label>
+<div class="flex items-center gap-2">
+<span class="flex h-2 w-2 relative">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+<span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+</span>
+<span class="font-data-label text-data-label text-zinc-400">Query Valid</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Evaluated Results Table (Reuse) -->
+<div class="flex-1 overflow-auto flex flex-col bg-zinc-950">
+<div class="px-6 py-3 border-b border-zinc-800 bg-zinc-900/30 flex justify-between items-center sticky top-0 z-10 backdrop-blur-sm">
+<span class="font-data-label text-data-label text-zinc-400 uppercase tracking-wider">Preview Results (1,240 matches)</span>
+<button class="text-zinc-400 hover:text-white flex items-center gap-1 font-body-sm text-body-sm">
+<span class="material-symbols-outlined text-[16px]">refresh</span> Refresh Preview
+                        </button>
+</div>
+<!-- Table Header -->
+<div class="grid grid-cols-12 gap-4 px-6 py-2 border-b border-zinc-800 bg-zinc-950 font-data-label text-data-label text-zinc-500 uppercase tracking-wider sticky top-[45px] z-10">
+<div class="col-span-3">Profile</div>
+<div class="col-span-5">Bio Extract</div>
+<div class="col-span-2 text-right">Followers</div>
+<div class="col-span-2 text-right">Location</div>
+</div>
+<!-- Table Rows -->
+<div class="flex flex-col">
+<!-- Row 1 -->
+<div class="grid grid-cols-12 gap-4 px-6 py-cell-padding-y border-b border-zinc-800/50 hover:bg-zinc-900/50 transition-colors items-center h-10 group">
+<div class="col-span-3 flex items-center gap-2 overflow-hidden">
+<div class="w-5 h-5 rounded-full bg-zinc-800 shrink-0 overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="A small, professional headshot photo of a male tech founder in his 30s, dramatic side lighting, stark grey background, high contrast corporate style." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAZVKg4pw6n0gi3SX1NuRIH0YSI7gq5ipQhrLBk6HaZnOe60uD-OHHyoFS6t3OeHzQffVR3zKkREZMpaxu_ZHuPK9KNmZp-g9WkDPjwuQ0gO1eYqvOzhruAOJAaSNBhZ-C30zVXIyEMCH9wI8o8mcX0fJc10u5mnMmCo2shH8HfDCXkZbj5C8bofiUkOGYTN059kL33F8d3vBTkssanVSL8LSLkDwI8Y94c9OgqwpfuJWw7EM4fRd1p"/>
+</div>
+<span class="font-body-sm text-body-sm text-zinc-200 truncate group-hover:text-amber-400 cursor-pointer">@alex_founder</span>
+<span class="material-symbols-outlined text-[14px] text-blue-400 shrink-0" style="font-variation-settings: 'FILL' 1;">verified</span>
+</div>
+<div class="col-span-5 truncate font-data-mono text-data-mono text-zinc-400 text-[12px]">
+                                Building the future of AI. <span class="text-amber-500 font-medium">Founder</span> @ StealthStartup.
+                            </div>
+<div class="col-span-2 text-right font-data-mono text-data-mono text-zinc-300">
+                                12.4k
+                            </div>
+<div class="col-span-2 text-right font-body-sm text-body-sm text-zinc-500 truncate">
+                                SF
+                            </div>
+</div>
+<!-- Row 2 -->
+<div class="grid grid-cols-12 gap-4 px-6 py-cell-padding-y border-b border-zinc-800/50 hover:bg-zinc-900/50 transition-colors items-center h-10 group">
+<div class="col-span-3 flex items-center gap-2 overflow-hidden">
+<div class="w-5 h-5 rounded-full bg-zinc-800 shrink-0 overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="A small, professional headshot photo of a female tech CEO in her 40s, bright white lighting, clean modern aesthetic, corporate minimalist style." src="https://lh3.googleusercontent.com/aida-public/AB6AXuATZTedV0xrI-z7lbBXCZfg-6PYQIiqZNh9fuzSqliQrS0YaqB77CiDnM30IR5pk4-wHhFNEvBsqF6frQW6kYK4lVY7cvs7YVpzdKRJfxgDfE-aO2nb0LlIkd99khwbQPkQtXWrA8xxCmh1JwmDBJaif3Kexr3jY_ChB8BVL0XMhWzric5rlms71StBeCfOl07BsHUZvvjcRsuXp6EGg-yo3yPnwNsAzuvysQntLDpsmVdQvsPUl7LM"/>
+</div>
+<span class="font-body-sm text-body-sm text-zinc-200 truncate group-hover:text-amber-400 cursor-pointer">@sarah_tech</span>
+<span class="material-symbols-outlined text-[14px] text-blue-400 shrink-0" style="font-variation-settings: 'FILL' 1;">verified</span>
+</div>
+<div class="col-span-5 truncate font-data-mono text-data-mono text-zinc-400 text-[12px]">
+                                ex-FAANG. <span class="text-amber-500 font-medium">CEO</span> &amp; <span class="text-amber-500 font-medium">Founder</span> of data tools.
+                            </div>
+<div class="col-span-2 text-right font-data-mono text-data-mono text-zinc-300">
+                                8.1k
+                            </div>
+<div class="col-span-2 text-right font-body-sm text-body-sm text-zinc-500 truncate">
+                                San Francisco
+                            </div>
+</div>
+<!-- Row 3 -->
+<div class="grid grid-cols-12 gap-4 px-6 py-cell-padding-y border-b border-zinc-800/50 hover:bg-zinc-900/50 transition-colors items-center h-10 group">
+<div class="col-span-3 flex items-center gap-2 overflow-hidden">
+<div class="w-5 h-5 rounded-full bg-zinc-800 shrink-0 flex items-center justify-center text-[10px] text-zinc-500 font-data-mono">
+                                    JD
+                                </div>
+<span class="font-body-sm text-body-sm text-zinc-200 truncate group-hover:text-amber-400 cursor-pointer">@jdoe_builds</span>
+<span class="material-symbols-outlined text-[14px] text-blue-400 shrink-0" style="font-variation-settings: 'FILL' 1;">verified</span>
+</div>
+<div class="col-span-5 truncate font-data-mono text-data-mono text-zinc-400 text-[12px]">
+<span class="text-amber-500 font-medium">Founder</span>. Building fast things in the bay area.
+                            </div>
+<div class="col-span-2 text-right font-data-mono text-data-mono text-zinc-300">
+                                2.2k
+                            </div>
+<div class="col-span-2 text-right font-body-sm text-body-sm text-zinc-500 truncate">
+                                SF Bay Area
+                            </div>
+</div>
+<!-- Row 4 -->
+<div class="grid grid-cols-12 gap-4 px-6 py-cell-padding-y border-b border-zinc-800/50 hover:bg-zinc-900/50 transition-colors items-center h-10 group opacity-60">
+<div class="col-span-12 flex justify-center py-4">
+<div class="flex items-center gap-2 text-zinc-500 font-body-sm">
+<span class="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>
+                                    Loading more evaluated leads...
+                                </div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<style>
+        /* Custom scrollbar for inner panes */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background-color: #3f3f46; /* zinc-700 */
+            border-radius: 20px;
+        }
+    </style>
+</body></html>

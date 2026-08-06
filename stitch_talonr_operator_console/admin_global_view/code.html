@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Talonr - Admin Audit View</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600&amp;family=JetBrains+Mono:wght@450;500&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "error-container": "#ffdad6",
+                        "primary-fixed": "#ffdcc3",
+                        "surface-bright": "#fcf8fb",
+                        "primary-container": "#b15f00",
+                        "primary-fixed-dim": "#ffb77d",
+                        "surface-container-high": "#eae7ea",
+                        "secondary": "#5d5e66",
+                        "on-error-container": "#93000a",
+                        "inverse-surface": "#313032",
+                        "secondary-fixed-dim": "#c6c5cf",
+                        "tertiary-container": "#007abd",
+                        "inverse-primary": "#ffb77d",
+                        "tertiary-fixed": "#cee5ff",
+                        "on-surface-variant": "#554336",
+                        "surface-dim": "#dcd9dc",
+                        "on-secondary-fixed": "#1a1b22",
+                        "tertiary-fixed-dim": "#96ccff",
+                        "on-tertiary-container": "#fdfcff",
+                        "on-primary-container": "#fffbff",
+                        "on-surface": "#1c1b1d",
+                        "on-error": "#ffffff",
+                        "on-secondary-fixed-variant": "#46464e",
+                        "surface-container": "#f0edf0",
+                        "on-secondary-container": "#63646c",
+                        "outline-variant": "#dbc2b0",
+                        "on-primary": "#ffffff",
+                        "surface": "#fcf8fb",
+                        "surface-container-lowest": "#ffffff",
+                        "secondary-fixed": "#e3e1ec",
+                        "background": "#fcf8fb",
+                        "surface-container-highest": "#e5e1e4",
+                        "on-tertiary-fixed": "#001d32",
+                        "on-secondary": "#ffffff",
+                        "surface-tint": "#904d00",
+                        "primary": "#8d4b00",
+                        "on-tertiary-fixed-variant": "#004a75",
+                        "inverse-on-surface": "#f3f0f2",
+                        "error": "#ba1a1a",
+                        "outline": "#887364",
+                        "surface-variant": "#e5e1e4",
+                        "tertiary": "#006096",
+                        "on-background": "#1c1b1d",
+                        "secondary-container": "#e3e1ec",
+                        "surface-container-low": "#f6f2f5",
+                        "on-tertiary": "#ffffff",
+                        "on-primary-fixed-variant": "#6e3900",
+                        "on-primary-fixed": "#2f1500"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "gutter": "1rem",
+                        "sidebar-width": "240px",
+                        "container-margin": "1.5rem",
+                        "cell-padding-y": "0.5rem",
+                        "cell-padding-x": "0.75rem"
+                    },
+                    "fontFamily": {
+                        "display": ["Geist"],
+                        "body-sm": ["Geist"],
+                        "headline": ["Geist"],
+                        "data-label": ["JetBrains Mono"],
+                        "body-base": ["Geist"],
+                        "data-mono": ["JetBrains Mono"]
+                    },
+                    "fontSize": {
+                        "display": ["24px", { "lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+                        "body-sm": ["13px", { "lineHeight": "18px", "fontWeight": "400" }],
+                        "headline": ["18px", { "lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "data-label": ["11px", { "lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500" }],
+                        "body-base": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
+                        "data-mono": ["13px", { "lineHeight": "18px", "fontWeight": "450" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .sidebar-transition { transition: width 0.2s ease-in-out; }
+    </style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 font-body-base antialiased flex h-screen overflow-hidden selection:bg-amber-600/30 selection:text-amber-100">
+<!-- Top Navigation (Mobile Only) -->
+<header class="md:hidden flex justify-between items-center h-14 px-gutter w-full sticky top-0 z-50 bg-zinc-900 border-b border-zinc-800">
+<div class="flex items-center gap-2">
+<span class="font-headline text-headline text-zinc-100">Talonr</span>
+</div>
+<div class="flex items-center gap-4">
+<div class="relative w-48 hidden sm:block">
+<span class="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-zinc-400 text-[18px]">search</span>
+<input class="w-full h-8 pl-8 pr-3 bg-zinc-800 border border-zinc-700 rounded text-body-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-amber-600 transition-colors" placeholder="Search..." type="text"/>
+</div>
+<button class="text-zinc-400 hover:text-amber-600 transition-colors"><span class="material-symbols-outlined">notifications</span></button>
+<button class="text-zinc-400 hover:text-amber-600 transition-colors"><span class="material-symbols-outlined">help_outline</span></button>
+<button class="w-8 h-8 rounded-full overflow-hidden border border-zinc-700">
+<img alt="User avatar" class="w-full h-full object-cover" data-alt="A small, professional user avatar portrait of an individual, lit with soft studio lighting against a neutral background. The aesthetic is clean, corporate, and minimalist." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAKLXtLzTeN5fUtIPULYAcvpALL9rTd0FJEWnoTUb_7WBGNVsSSKzCBLWDx2b2XwOSQMvNCo6q80t_HaIJZXslFBQ2jHYupp1fGQS8vAeG5wic-KFPIuF-Evphy2Rbh4HtRYZ4CiY6HjrCSEOWyT9XRRVTf4N2Eo31J4uetmtzg2L0EcTBWONtSJRoqT-s-QhJuthuYyegW1pBpug86qnL_ThOcWiPNG9QTYmoZsyiNODr2j-rhCpB0"/>
+</button>
+</div>
+</header>
+<!-- Side Navigation -->
+<aside class="hidden md:flex flex-col h-full py-gutter px-4 bg-zinc-900 border-r border-zinc-800 w-[240px] sticky left-0 top-0 sidebar-transition z-40">
+<div class="flex items-center gap-3 mb-8 px-2">
+<div>
+<h1 class="font-display text-display text-amber-600">Talonr</h1>
+<p class="font-data-label text-data-label text-zinc-500 uppercase tracking-widest">Lead Intelligence</p>
+</div>
+</div>
+<nav class="flex-1 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-100 transition-colors cursor-pointer active:scale-95 group" href="#">
+<span class="material-symbols-outlined group-hover:text-amber-600 transition-colors">dashboard</span>
+<span class="font-body-base text-body-base">Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-100 transition-colors cursor-pointer active:scale-95 group" href="#">
+<span class="material-symbols-outlined group-hover:text-amber-600 transition-colors">account_circle</span>
+<span class="font-body-base text-body-base">X Accounts</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-100 transition-colors cursor-pointer active:scale-95 group" href="#">
+<span class="material-symbols-outlined group-hover:text-amber-600 transition-colors">travel_explore</span>
+<span class="font-body-base text-body-base">Scrapes</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-100 transition-colors cursor-pointer active:scale-95 group" href="#">
+<span class="material-symbols-outlined group-hover:text-amber-600 transition-colors">person_search</span>
+<span class="font-body-base text-body-base">Leads</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-100 transition-colors cursor-pointer active:scale-95 group" href="#">
+<span class="material-symbols-outlined group-hover:text-amber-600 transition-colors">list_alt</span>
+<span class="font-body-base text-body-base">Lead Lists</span>
+</a>
+</nav>
+<div class="mt-auto space-y-1 pt-4 border-t border-zinc-800">
+<a class="flex items-center gap-3 px-3 py-2 text-amber-600 border-r-2 border-amber-600 font-bold bg-zinc-800 rounded-l cursor-pointer" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">admin_panel_settings</span>
+<span class="font-body-base text-body-base">Admin Settings</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-100 transition-colors cursor-pointer active:scale-95 group" href="#">
+<span class="material-symbols-outlined group-hover:text-amber-600 transition-colors">query_stats</span>
+<span class="font-body-base text-body-base">System Health</span>
+</a>
+</div>
+<button class="mt-6 w-full py-2 bg-amber-600 hover:bg-amber-700 text-white rounded flex items-center justify-center gap-2 transition-colors border border-transparent shadow-sm">
+<span class="material-symbols-outlined text-[18px]">add</span>
+<span class="font-body-sm text-body-sm font-semibold">New Scrape</span>
+</button>
+</aside>
+<!-- Main Content -->
+<main class="flex-1 flex flex-col h-full overflow-hidden bg-zinc-950">
+<!-- Header -->
+<div class="px-container-margin py-6 flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-zinc-800 bg-zinc-950 z-10 relative">
+<div>
+<div class="flex items-center gap-2 mb-1">
+<span class="material-symbols-outlined text-amber-600 text-[20px]">admin_panel_settings</span>
+<h2 class="font-headline text-headline text-zinc-100">Admin Audit</h2>
+</div>
+<p class="font-body-sm text-body-sm text-zinc-400">Cross-user visibility for platform operations. Read-only access.</p>
+</div>
+<div class="flex items-center gap-3">
+<div class="relative w-64">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-[16px]">filter_alt</span>
+<input class="w-full h-9 pl-9 pr-3 bg-zinc-900 border border-zinc-800 rounded font-data-mono text-data-mono text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-amber-600 transition-colors shadow-sm" placeholder="Filter by User Email..." type="text"/>
+</div>
+<button class="h-9 px-4 border border-zinc-800 rounded font-body-sm text-body-sm text-zinc-300 hover:bg-zinc-800 transition-colors flex items-center gap-2 shadow-sm">
+<span class="material-symbols-outlined text-[16px]">download</span> Export
+                 </button>
+</div>
+</div>
+<!-- Content Area -->
+<div class="flex-1 overflow-auto p-container-margin relative">
+<!-- Tabs -->
+<div class="flex border-b border-zinc-800 mb-6">
+<button class="px-6 py-2 border-b-2 border-amber-600 text-amber-600 font-body-base text-body-base font-semibold">
+                    Active Jobs (14)
+                </button>
+<button class="px-6 py-2 border-b-2 border-transparent text-zinc-400 hover:text-zinc-100 transition-colors font-body-base text-body-base">
+                    Connected Accounts (128)
+                </button>
+</div>
+<!-- Bento Grid Layout -->
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+<!-- Main Data Table (Spans 2 cols on XL) -->
+<div class="xl:col-span-2 bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden flex flex-col shadow-sm">
+<div class="px-4 py-3 border-b border-zinc-800 bg-zinc-900/50 flex justify-between items-center">
+<h3 class="font-body-base text-body-base font-semibold text-zinc-100">Global Running Jobs</h3>
+<span class="px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 font-data-mono text-[11px] border border-blue-500/20">LIVE STREAM</span>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-zinc-900 border-b border-zinc-800">
+<th class="px-cell-padding-x py-cell-padding-y font-data-label text-data-label text-zinc-500 uppercase">Job ID</th>
+<th class="px-cell-padding-x py-cell-padding-y font-data-label text-data-label text-zinc-500 uppercase">Owner Email</th>
+<th class="px-cell-padding-x py-cell-padding-y font-data-label text-data-label text-zinc-500 uppercase">Target List</th>
+<th class="px-cell-padding-x py-cell-padding-y font-data-label text-data-label text-zinc-500 uppercase">Progress</th>
+<th class="px-cell-padding-x py-cell-padding-y font-data-label text-data-label text-zinc-500 uppercase">Status</th>
+</tr>
+</thead>
+<tbody class="font-body-sm text-body-sm">
+<!-- Row 1 -->
+<tr class="border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors h-10">
+<td class="px-cell-padding-x py-cell-padding-y font-data-mono text-zinc-300">job_8f72a9</td>
+<td class="px-cell-padding-x py-cell-padding-y text-zinc-300">sarah.j@enterprise.com</td>
+<td class="px-cell-padding-x py-cell-padding-y text-zinc-400">Q3_SaaS_Founders</td>
+<td class="px-cell-padding-x py-cell-padding-y">
+<div class="flex items-center gap-2">
+<div class="w-24 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+<div class="h-full bg-amber-600 w-[65%]"></div>
+</div>
+<span class="font-data-mono text-[11px] text-zinc-400">65%</span>
+</div>
+</td>
+<td class="px-cell-padding-x py-cell-padding-y">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-data-mono text-[11px] border border-emerald-500/20">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Running
+                                        </span>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors h-10">
+<td class="px-cell-padding-x py-cell-padding-y font-data-mono text-zinc-300">job_91b4c2</td>
+<td class="px-cell-padding-x py-cell-padding-y text-zinc-300">mike.t@agency.io</td>
+<td class="px-cell-padding-x py-cell-padding-y text-zinc-400">Crypto_Influencers_EU</td>
+<td class="px-cell-padding-x py-cell-padding-y">
+<div class="flex items-center gap-2">
+<div class="w-24 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+<div class="h-full bg-amber-600 w-[12%]"></div>
+</div>
+<span class="font-data-mono text-[11px] text-zinc-400">12%</span>
+</div>
+</td>
+<td class="px-cell-padding-x py-cell-padding-y">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-data-mono text-[11px] border border-emerald-500/20">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Running
+                                        </span>
+</td>
+</tr>
+<!-- Row 3 -->
+<tr class="border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors h-10">
+<td class="px-cell-padding-x py-cell-padding-y font-data-mono text-zinc-300">job_3c88d1</td>
+<td class="px-cell-padding-x py-cell-padding-y text-zinc-300">admin@talonr.com</td>
+<td class="px-cell-padding-x py-cell-padding-y text-zinc-400">System_Audit_Sweep</td>
+<td class="px-cell-padding-x py-cell-padding-y">
+<div class="flex items-center gap-2">
+<div class="w-24 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+<div class="h-full bg-amber-500 w-[98%]"></div>
+</div>
+<span class="font-data-mono text-[11px] text-zinc-400">98%</span>
+</div>
+</td>
+<td class="px-cell-padding-x py-cell-padding-y">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/10 text-amber-500 font-data-mono text-[11px] border border-amber-500/20">
+                                            Rate Limited
+                                        </span>
+</td>
+</tr>
+<!-- Row 4 -->
+<tr class="border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors h-10">
+<td class="px-cell-padding-x py-cell-padding-y font-data-mono text-zinc-300">job_77f0a9</td>
+<td class="px-cell-padding-x py-cell-padding-y text-zinc-300">dev_test@talonr.com</td>
+<td class="px-cell-padding-x py-cell-padding-y text-zinc-400">Test_Scrape_Alpha</td>
+<td class="px-cell-padding-x py-cell-padding-y">
+<div class="flex items-center gap-2">
+<div class="w-24 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+<div class="h-full bg-zinc-600 w-[0%]"></div>
+</div>
+<span class="font-data-mono text-[11px] text-zinc-400">0%</span>
+</div>
+</td>
+<td class="px-cell-padding-x py-cell-padding-y">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-500/10 text-red-400 font-data-mono text-[11px] border border-red-500/20">
+                                            Failed
+                                        </span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<!-- Secondary Panel: System Load & Quick Actions -->
+<div class="flex flex-col gap-6">
+<!-- System Load Card -->
+<div class="bg-zinc-900 border border-zinc-800 rounded-xl p-5 shadow-sm relative overflow-hidden">
+<div class="absolute -right-4 -top-4 w-24 h-24 bg-amber-600/10 rounded-full blur-2xl"></div>
+<h3 class="font-body-base text-body-base font-semibold text-zinc-100 flex items-center gap-2 mb-4">
+<span class="material-symbols-outlined text-[18px] text-amber-600">speed</span> System Load
+                        </h3>
+<div class="space-y-4">
+<div>
+<div class="flex justify-between text-body-sm font-data-mono mb-1">
+<span class="text-zinc-400">API Rate Limits (Global)</span>
+<span class="text-zinc-100">78%</span>
+</div>
+<div class="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+<div class="h-full bg-amber-600 w-[78%]"></div>
+</div>
+</div>
+<div>
+<div class="flex justify-between text-body-sm font-data-mono mb-1">
+<span class="text-zinc-400">Proxy Pool Utilization</span>
+<span class="text-zinc-100">42%</span>
+</div>
+<div class="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+<div class="h-full bg-blue-500 w-[42%]"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Filter / Details Context Card -->
+<div class="bg-zinc-900 border border-zinc-800 rounded-xl p-5 shadow-sm flex-1">
+<h3 class="font-body-base text-body-base font-semibold text-zinc-100 flex items-center gap-2 mb-4">
+<span class="material-symbols-outlined text-[18px] text-zinc-400">info</span> Audit Guidelines
+                        </h3>
+<p class="font-body-sm text-body-sm text-zinc-400 leading-relaxed mb-4">
+                            This view provides read-only access to all cross-tenant scraping jobs and connected X accounts. Use this interface strictly for debugging system-wide rate limiting issues, investigating failed jobs, or auditing user compliance.
+                        </p>
+<div class="p-3 bg-red-500/10 border border-red-500/20 rounded flex gap-3 items-start">
+<span class="material-symbols-outlined text-red-400 text-[18px] mt-0.5">warning</span>
+<p class="font-body-sm text-body-sm text-red-400">Do not manually terminate jobs unless authorized by a tier-2 escalation ticket.</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</body></html>

@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Talonr - X Accounts</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "error-container": "#ffdad6",
+                      "primary-fixed": "#ffdcc3",
+                      "surface-bright": "#fcf8fb",
+                      "primary-container": "#b15f00",
+                      "primary-fixed-dim": "#ffb77d",
+                      "surface-container-high": "#eae7ea",
+                      "secondary": "#5d5e66",
+                      "on-error-container": "#93000a",
+                      "inverse-surface": "#313032",
+                      "secondary-fixed-dim": "#c6c5cf",
+                      "tertiary-container": "#007abd",
+                      "inverse-primary": "#ffb77d",
+                      "tertiary-fixed": "#cee5ff",
+                      "on-surface-variant": "#554336",
+                      "surface-dim": "#dcd9dc",
+                      "on-secondary-fixed": "#1a1b22",
+                      "tertiary-fixed-dim": "#96ccff",
+                      "on-tertiary-container": "#fdfcff",
+                      "on-primary-container": "#fffbff",
+                      "on-surface": "#1c1b1d",
+                      "on-error": "#ffffff",
+                      "on-secondary-fixed-variant": "#46464e",
+                      "surface-container": "#f0edf0",
+                      "on-secondary-container": "#63646c",
+                      "outline-variant": "#dbc2b0",
+                      "on-primary": "#ffffff",
+                      "surface": "#fcf8fb",
+                      "surface-container-lowest": "#ffffff",
+                      "secondary-fixed": "#e3e1ec",
+                      "background": "#fcf8fb",
+                      "surface-container-highest": "#e5e1e4",
+                      "on-tertiary-fixed": "#001d32",
+                      "on-secondary": "#ffffff",
+                      "surface-tint": "#904d00",
+                      "primary": "#8d4b00",
+                      "on-tertiary-fixed-variant": "#004a75",
+                      "inverse-on-surface": "#f3f0f2",
+                      "error": "#ba1a1a",
+                      "outline": "#887364",
+                      "surface-variant": "#e5e1e4",
+                      "tertiary": "#006096",
+                      "on-background": "#1c1b1d",
+                      "secondary-container": "#e3e1ec",
+                      "surface-container-low": "#f6f2f5",
+                      "on-tertiary": "#ffffff",
+                      "on-primary-fixed-variant": "#6e3900",
+                      "on-primary-fixed": "#2f1500"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.125rem",
+                      "lg": "0.25rem",
+                      "xl": "0.5rem",
+                      "full": "0.75rem"
+              },
+              "spacing": {
+                      "gutter": "1rem",
+                      "sidebar-width": "240px",
+                      "container-margin": "1.5rem",
+                      "cell-padding-y": "0.5rem",
+                      "cell-padding-x": "0.75rem"
+              },
+              "fontFamily": {
+                      "display": ["Geist"],
+                      "body-sm": ["Geist"],
+                      "headline": ["Geist"],
+                      "data-label": ["JetBrains Mono"],
+                      "body-base": ["Geist"],
+                      "data-mono": ["JetBrains Mono"]
+              },
+              "fontSize": {
+                      "display": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                      "body-sm": ["13px", {"lineHeight": "18px", "fontWeight": "400"}],
+                      "headline": ["18px", {"lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                      "data-label": ["11px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                      "body-base": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                      "data-mono": ["13px", {"lineHeight": "18px", "fontWeight": "450"}]
+              }
+            },
+          },
+        }
+    </script>
+<style>
+        body { font-family: 'Geist', sans-serif; }
+    </style>
+</head>
+<body class="bg-surface dark:bg-inverse-surface text-on-surface dark:text-on-primary-fixed h-screen overflow-hidden flex font-body-base text-body-base">
+<!-- SideNavBar -->
+<aside class="w-[240px] h-screen sticky left-0 top-0 border-r border-outline-variant dark:border-outline bg-surface dark:bg-inverse-surface flex flex-col py-gutter px-4 hidden md:flex shrink-0">
+<div class="mb-8">
+<h1 class="font-display text-display text-primary dark:text-primary-fixed-dim">Talonr</h1>
+<p class="font-data-label text-data-label text-on-surface-variant dark:text-on-secondary-fixed-variant uppercase">Lead Intelligence</p>
+</div>
+<button class="mb-6 w-full py-2 px-4 bg-primary text-on-primary rounded font-data-label text-data-label flex items-center justify-center gap-2 hover:bg-surface-tint transition-colors cursor-pointer active:scale-95">
+<span class="material-symbols-outlined text-[18px]">add</span> New Scrape
+        </button>
+<nav class="flex-1 flex flex-col gap-2">
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant dark:text-on-secondary-fixed-variant hover:bg-surface-container-high dark:hover:bg-on-secondary-fixed-variant transition-colors cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined text-[20px]">dashboard</span>
+<span>Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-primary dark:text-primary-fixed-dim border-r-2 border-primary dark:border-primary-fixed-dim font-bold cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined text-[20px]">account_circle</span>
+<span>X Accounts</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant dark:text-on-secondary-fixed-variant hover:bg-surface-container-high dark:hover:bg-on-secondary-fixed-variant transition-colors cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined text-[20px]">travel_explore</span>
+<span>Scrapes</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant dark:text-on-secondary-fixed-variant hover:bg-surface-container-high dark:hover:bg-on-secondary-fixed-variant transition-colors cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined text-[20px]">person_search</span>
+<span>Leads</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant dark:text-on-secondary-fixed-variant hover:bg-surface-container-high dark:hover:bg-on-secondary-fixed-variant transition-colors cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined text-[20px]">list_alt</span>
+<span>Lead Lists</span>
+</a>
+</nav>
+<div class="mt-auto border-t border-outline-variant dark:border-outline pt-4 flex flex-col gap-2">
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant dark:text-on-secondary-fixed-variant hover:bg-surface-container-high dark:hover:bg-on-secondary-fixed-variant transition-colors cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined text-[20px]">admin_panel_settings</span>
+<span>Admin Settings</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant dark:text-on-secondary-fixed-variant hover:bg-surface-container-high dark:hover:bg-on-secondary-fixed-variant transition-colors cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined text-[20px]">query_stats</span>
+<span>System Health</span>
+</a>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col h-screen overflow-hidden">
+<!-- TopNavBar (Mobile Only for Sidebar Layout) -->
+<header class="flex justify-between items-center h-14 px-gutter w-full sticky top-0 z-50 border-b border-outline-variant dark:border-outline bg-surface-bright dark:bg-surface-dim md:hidden">
+<div class="flex items-center gap-4">
+<button class="material-symbols-outlined text-primary dark:text-primary-fixed-dim">menu</button>
+<span class="font-headline text-headline text-on-surface dark:text-on-primary-fixed">Talonr</span>
+</div>
+</header>
+<!-- Content Canvas -->
+<div class="flex-1 overflow-auto p-container-margin">
+<div class="flex justify-between items-end mb-8">
+<div>
+<h2 class="font-display text-display text-on-surface dark:text-on-primary-fixed mb-1">X Accounts</h2>
+<p class="text-on-surface-variant dark:text-secondary-fixed-dim text-body-sm font-body-sm">Manage connected extraction accounts and monitor rate limits.</p>
+</div>
+<button class="bg-primary text-on-primary px-4 py-2 rounded font-data-label text-data-label flex items-center gap-2 hover:bg-surface-tint transition-colors">
+<span class="material-symbols-outlined text-[18px]">add_link</span> Connect Account
+                </button>
+</div>
+<!-- Bento Layout for Accounts -->
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+<!-- Accounts Table Section -->
+<div class="xl:col-span-2 flex flex-col gap-4">
+<div class="bg-surface-container-lowest dark:bg-[#1a1a1c] border border-outline-variant dark:border-outline rounded-lg overflow-hidden flex flex-col">
+<div class="px-6 py-4 border-b border-outline-variant dark:border-outline flex justify-between items-center bg-surface-container-low dark:bg-[#222225]">
+<h3 class="font-headline text-headline text-on-surface dark:text-on-primary-fixed">Active Pool</h3>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-[16px]">search</span>
+<input class="bg-transparent border border-outline-variant dark:border-outline rounded pl-9 pr-3 py-1 font-data-mono text-data-mono text-on-surface dark:text-on-primary-fixed focus:border-primary dark:focus:border-primary-fixed-dim focus:ring-0 outline-none w-64" placeholder="Filter handles..." type="text"/>
+</div>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="border-b border-outline-variant dark:border-outline bg-surface-container dark:bg-[#1f1f22]">
+<th class="py-3 px-6 font-data-label text-data-label text-on-surface-variant dark:text-secondary-fixed-dim uppercase tracking-wider">Handle</th>
+<th class="py-3 px-6 font-data-label text-data-label text-on-surface-variant dark:text-secondary-fixed-dim uppercase tracking-wider">Status</th>
+<th class="py-3 px-6 font-data-label text-data-label text-on-surface-variant dark:text-secondary-fixed-dim uppercase tracking-wider text-right">Daily Limit</th>
+<th class="py-3 px-6 font-data-label text-data-label text-on-surface-variant dark:text-secondary-fixed-dim uppercase tracking-wider text-right">Max Conc.</th>
+<th class="py-3 px-6 font-data-label text-data-label text-on-surface-variant dark:text-secondary-fixed-dim uppercase tracking-wider">Last Used</th>
+<th class="py-3 px-6"></th>
+</tr>
+</thead>
+<tbody>
+<tr class="border-b border-outline-variant dark:border-[#333336] hover:bg-surface-container-low dark:hover:bg-[#242427] transition-colors group">
+<td class="py-3 px-6 font-data-mono text-data-mono text-on-surface dark:text-on-primary-fixed">@growth_lead_01</td>
+<td class="py-3 px-6">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 font-data-label text-data-label">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Active
+                                            </span>
+</td>
+<td class="py-3 px-6 font-data-mono text-data-mono text-on-surface-variant dark:text-secondary-fixed-dim text-right">450 / 500</td>
+<td class="py-3 px-6 font-data-mono text-data-mono text-on-surface-variant dark:text-secondary-fixed-dim text-right">2</td>
+<td class="py-3 px-6 font-body-sm text-body-sm text-on-surface-variant dark:text-secondary-fixed-dim">Just now</td>
+<td class="py-3 px-6 text-right opacity-0 group-hover:opacity-100 transition-opacity">
+<button class="material-symbols-outlined text-on-surface-variant dark:text-secondary-fixed-dim hover:text-primary dark:hover:text-primary-fixed-dim text-[18px]">more_vert</button>
+</td>
+</tr>
+<tr class="border-b border-outline-variant dark:border-[#333336] hover:bg-surface-container-low dark:hover:bg-[#242427] transition-colors group">
+<td class="py-3 px-6 font-data-mono text-data-mono text-on-surface dark:text-on-primary-fixed">@tech_outreach_x</td>
+<td class="py-3 px-6">
+<div class="flex flex-col gap-1">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-500 font-data-label text-data-label w-fit">
+<span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Checkpointed
+                                                </span>
+<span class="font-data-label text-[9px] text-amber-600/70 dark:text-amber-400/70">Phone Verification Req.</span>
+</div>
+</td>
+<td class="py-3 px-6 font-data-mono text-data-mono text-on-surface-variant dark:text-secondary-fixed-dim text-right">120 / 500</td>
+<td class="py-3 px-6 font-data-mono text-data-mono text-on-surface-variant dark:text-secondary-fixed-dim text-right">1</td>
+<td class="py-3 px-6 font-body-sm text-body-sm text-on-surface-variant dark:text-secondary-fixed-dim">2h ago</td>
+<td class="py-3 px-6 text-right opacity-0 group-hover:opacity-100 transition-opacity">
+<button class="material-symbols-outlined text-on-surface-variant dark:text-secondary-fixed-dim hover:text-primary dark:hover:text-primary-fixed-dim text-[18px]">more_vert</button>
+</td>
+</tr>
+<tr class="border-b border-outline-variant dark:border-[#333336] hover:bg-surface-container-low dark:hover:bg-[#242427] transition-colors group">
+<td class="py-3 px-6 font-data-mono text-data-mono text-on-surface dark:text-on-primary-fixed line-through opacity-50">@data_miner_09</td>
+<td class="py-3 px-6">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-red-500/10 border border-red-500/20 text-red-500 font-data-label text-data-label">
+<span class="w-1.5 h-1.5 rounded-full bg-red-500"></span> Banned
+                                            </span>
+</td>
+<td class="py-3 px-6 font-data-mono text-data-mono text-on-surface-variant dark:text-secondary-fixed-dim text-right opacity-50">-</td>
+<td class="py-3 px-6 font-data-mono text-data-mono text-on-surface-variant dark:text-secondary-fixed-dim text-right opacity-50">-</td>
+<td class="py-3 px-6 font-body-sm text-body-sm text-on-surface-variant dark:text-secondary-fixed-dim">1d ago</td>
+<td class="py-3 px-6 text-right opacity-0 group-hover:opacity-100 transition-opacity">
+<button class="material-symbols-outlined text-on-surface-variant dark:text-secondary-fixed-dim hover:text-primary dark:hover:text-primary-fixed-dim text-[18px]">more_vert</button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+<!-- Metrics & Modal Placeholder -->
+<div class="flex flex-col gap-6">
+<!-- Pool Health -->
+<div class="bg-surface-container-lowest dark:bg-[#1a1a1c] border border-outline-variant dark:border-outline rounded-lg p-6">
+<h3 class="font-headline text-headline text-on-surface dark:text-on-primary-fixed mb-4">Pool Health</h3>
+<div class="grid grid-cols-2 gap-4 mb-6">
+<div>
+<p class="font-data-label text-data-label text-on-surface-variant dark:text-secondary-fixed-dim uppercase mb-1">Total Active</p>
+<p class="font-display text-[32px] font-semibold text-emerald-500">24</p>
+</div>
+<div>
+<p class="font-data-label text-data-label text-on-surface-variant dark:text-secondary-fixed-dim uppercase mb-1">Total Capacity</p>
+<p class="font-display text-[32px] font-semibold text-on-surface dark:text-on-primary-fixed">12k<span class="text-lg text-on-surface-variant dark:text-secondary-fixed-dim font-normal">/d</span></p>
+</div>
+</div>
+<div class="w-full bg-surface-container-high dark:bg-[#2a2a2d] h-2 rounded-full overflow-hidden flex">
+<div class="bg-emerald-500 h-full" style="width: 70%"></div>
+<div class="bg-amber-500 h-full" style="width: 20%"></div>
+<div class="bg-red-500 h-full" style="width: 10%"></div>
+</div>
+<div class="flex justify-between mt-2 font-data-label text-[10px] text-on-surface-variant dark:text-secondary-fixed-dim">
+<span>70% Active</span>
+<span>20% Checkpoint</span>
+<span>10% Banned</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</body></html>

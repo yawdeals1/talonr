@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Talonr - Leads</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600&amp;family=JetBrains+Mono:wght@450;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "error-container": "#ffdad6",
+                      "primary-fixed": "#ffdcc3",
+                      "surface-bright": "#fcf8fb",
+                      "primary-container": "#b15f00",
+                      "primary-fixed-dim": "#ffb77d",
+                      "surface-container-high": "#eae7ea",
+                      "secondary": "#5d5e66",
+                      "on-error-container": "#93000a",
+                      "inverse-surface": "#313032",
+                      "secondary-fixed-dim": "#c6c5cf",
+                      "tertiary-container": "#007abd",
+                      "inverse-primary": "#ffb77d",
+                      "tertiary-fixed": "#cee5ff",
+                      "on-surface-variant": "#554336",
+                      "surface-dim": "#dcd9dc",
+                      "on-secondary-fixed": "#1a1b22",
+                      "tertiary-fixed-dim": "#96ccff",
+                      "on-tertiary-container": "#fdfcff",
+                      "on-primary-container": "#fffbff",
+                      "on-surface": "#1c1b1d",
+                      "on-error": "#ffffff",
+                      "on-secondary-fixed-variant": "#46464e",
+                      "surface-container": "#f0edf0",
+                      "on-secondary-container": "#63646c",
+                      "outline-variant": "#dbc2b0",
+                      "on-primary": "#ffffff",
+                      "surface": "#fcf8fb",
+                      "surface-container-lowest": "#ffffff",
+                      "secondary-fixed": "#e3e1ec",
+                      "background": "#fcf8fb",
+                      "surface-container-highest": "#e5e1e4",
+                      "on-tertiary-fixed": "#001d32",
+                      "on-secondary": "#ffffff",
+                      "surface-tint": "#904d00",
+                      "primary": "#8d4b00",
+                      "on-tertiary-fixed-variant": "#004a75",
+                      "inverse-on-surface": "#f3f0f2",
+                      "error": "#ba1a1a",
+                      "outline": "#887364",
+                      "surface-variant": "#e5e1e4",
+                      "tertiary": "#006096",
+                      "on-background": "#1c1b1d",
+                      "secondary-container": "#e3e1ec",
+                      "surface-container-low": "#f6f2f5",
+                      "on-tertiary": "#ffffff",
+                      "on-primary-fixed-variant": "#6e3900",
+                      "on-primary-fixed": "#2f1500"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.125rem",
+                      "lg": "0.25rem",
+                      "xl": "0.5rem",
+                      "full": "0.75rem"
+              },
+              "spacing": {
+                      "gutter": "1rem",
+                      "sidebar-width": "240px",
+                      "container-margin": "1.5rem",
+                      "cell-padding-y": "0.5rem",
+                      "cell-padding-x": "0.75rem"
+              },
+              "fontFamily": {
+                      "display": ["Geist"],
+                      "body-sm": ["Geist"],
+                      "headline": ["Geist"],
+                      "data-label": ["JetBrains Mono"],
+                      "body-base": ["Geist"],
+                      "data-mono": ["JetBrains Mono"]
+              },
+              "fontSize": {
+                      "display": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                      "body-sm": ["13px", {"lineHeight": "18px", "fontWeight": "400"}],
+                      "headline": ["18px", {"lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                      "data-label": ["11px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                      "body-base": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                      "data-mono": ["13px", {"lineHeight": "18px", "fontWeight": "450"}]
+              }
+            },
+          }
+        }
+    </script>
+<style>
+        body { font-family: 'Geist', sans-serif; background-color: #fafafa; }
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+        .icon-fill { font-variation-settings: 'FILL' 1; }
+        
+        /* Minimalist Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
+    </style>
+</head>
+<body class="bg-zinc-50 text-zinc-900 flex h-screen overflow-hidden antialiased selection:bg-amber-100 selection:text-amber-900">
+<!-- SideNavBar (JSON) -->
+<aside class="hidden md:flex w-[240px] h-screen sticky left-0 top-0 border-r border-zinc-200 bg-white flex-col py-gutter px-4 z-40 shrink-0">
+<div class="flex items-center gap-3 mb-8 px-2">
+<span class="material-symbols-outlined text-amber-600 text-[28px] icon-fill" data-icon="token">token</span>
+<div>
+<h1 class="font-display text-display text-zinc-900 leading-none">Talonr</h1>
+<p class="font-data-label text-data-label text-zinc-500 mt-1 uppercase tracking-wider">Lead Intelligence</p>
+</div>
+</div>
+<button class="w-full bg-amber-600 hover:bg-amber-700 text-white font-body-base text-body-base py-2.5 px-4 rounded transition-colors mb-6 flex items-center justify-center gap-2 shadow-sm">
+<span class="material-symbols-outlined text-[18px]" data-icon="add">add</span>
+            New Scrape
+        </button>
+<nav class="flex-1 space-y-1">
+<!-- Inactive -->
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-600 hover:bg-zinc-100 transition-colors font-body-base text-body-base cursor-pointer active:scale-95 group" href="#">
+<span class="material-symbols-outlined text-[20px] group-hover:text-zinc-900 transition-colors" data-icon="dashboard">dashboard</span>
+                Dashboard
+            </a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-600 hover:bg-zinc-100 transition-colors font-body-base text-body-base cursor-pointer active:scale-95 group" href="#">
+<span class="material-symbols-outlined text-[20px] group-hover:text-zinc-900 transition-colors" data-icon="account_circle">account_circle</span>
+                X Accounts
+            </a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-600 hover:bg-zinc-100 transition-colors font-body-base text-body-base cursor-pointer active:scale-95 group" href="#">
+<span class="material-symbols-outlined text-[20px] group-hover:text-zinc-900 transition-colors" data-icon="travel_explore">travel_explore</span>
+                Scrapes
+            </a>
+<!-- Active -->
+<a class="flex items-center gap-3 px-3 py-2 text-amber-700 border-r-2 border-amber-600 font-bold bg-amber-50 cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined text-[20px] icon-fill" data-icon="person_search">person_search</span>
+                Leads
+            </a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-600 hover:bg-zinc-100 transition-colors font-body-base text-body-base cursor-pointer active:scale-95 group" href="#">
+<span class="material-symbols-outlined text-[20px] group-hover:text-zinc-900 transition-colors" data-icon="list_alt">list_alt</span>
+                Lead Lists
+            </a>
+</nav>
+<div class="mt-auto border-t border-zinc-200 pt-4 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-600 hover:bg-zinc-100 transition-colors font-body-base text-body-base cursor-pointer active:scale-95 group" href="#">
+<span class="material-symbols-outlined text-[20px] group-hover:text-zinc-900 transition-colors" data-icon="admin_panel_settings">admin_panel_settings</span>
+                Admin Settings
+            </a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-zinc-600 hover:bg-zinc-100 transition-colors font-body-base text-body-base cursor-pointer active:scale-95 group" href="#">
+<span class="material-symbols-outlined text-[20px] group-hover:text-zinc-900 transition-colors" data-icon="query_stats">query_stats</span>
+                System Health
+            </a>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col min-w-0 bg-zinc-50 h-full relative">
+<!-- TopNavBar (JSON - Mobile Only Fallback & Desktop Header) -->
+<header class="flex justify-between items-center h-14 px-gutter w-full sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-zinc-200 transition-all duration-200 shrink-0 shadow-sm">
+<div class="flex items-center md:hidden gap-3">
+<span class="material-symbols-outlined text-amber-600 text-[24px] icon-fill" data-icon="token">token</span>
+<span class="font-headline text-headline text-zinc-900 font-bold">Talonr</span>
+</div>
+<div class="hidden md:flex items-center gap-2">
+<h2 class="font-headline text-headline text-zinc-900">Leads Browser</h2>
+<span class="px-2 py-0.5 rounded bg-zinc-100 text-zinc-600 font-data-label text-data-label border border-zinc-200">14,209 Total</span>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2 text-zinc-500">
+<button class="p-1.5 rounded hover:bg-zinc-100 transition-colors cursor-pointer text-zinc-600 hover:text-zinc-900">
+<span class="material-symbols-outlined text-[20px]" data-icon="notifications">notifications</span>
+</button>
+<button class="p-1.5 rounded hover:bg-zinc-100 transition-colors cursor-pointer text-zinc-600 hover:text-zinc-900">
+<span class="material-symbols-outlined text-[20px]" data-icon="help_outline">help_outline</span>
+</button>
+</div>
+<div class="h-6 w-px bg-zinc-200"></div>
+<div class="flex items-center gap-3">
+<span class="hidden lg:inline-block px-2 py-1 rounded bg-zinc-100 text-zinc-600 font-data-label text-data-label border border-zinc-200">Admin Badge</span>
+<button class="font-body-sm text-body-sm text-zinc-500 hover:text-zinc-900 transition-colors">Logout</button>
+<img alt="User avatar" class="w-8 h-8 rounded-full border border-zinc-200 object-cover bg-zinc-100" data-alt="A small, professional circular avatar portrait of a user in a dark, high-end technical UI setting. Minimalist studio lighting, solid dark background." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCnbnx7DaWz3EF1MoQTrTChEy2kPp5i6hakf8xv5MOWSQ_ESDxTwWRDPhM80E5CUO5Icf0mQ8gbMSU8C2TS1hSiFQfOAbOVnI7JM_bjr02eIDDiDYVNQl7FcNDdCsir_nhhb90-mQKQ5jOZBOdsoSl06Jrq9dpp23e13aPOBINKE4OiPb__vLaANYjz7RIsk4zeCrI6_Q2UC37tNO3av3I_datHOg4YrUWak7ct2Rx-f2pJp_4_ieEw"/>
+</div>
+</div>
+</header>
+<!-- Content Canvas -->
+<div class="flex-1 overflow-auto flex flex-col p-container-margin gap-6">
+<!-- Toolbar: Filters & Actions -->
+<div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shrink-0">
+<div class="flex flex-1 w-full sm:w-auto items-center gap-3">
+<div class="relative flex-1 sm:max-w-md">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 text-[18px]" data-icon="search">search</span>
+<input class="w-full bg-white border border-zinc-300 rounded pl-9 pr-3 py-1.5 font-data-mono text-data-mono text-zinc-900 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 placeholder:text-zinc-400 h-[32px] transition-colors shadow-sm" placeholder="Search handles (regex supported)..." type="text"/>
+</div>
+<div class="relative shrink-0">
+<select class="appearance-none bg-white border border-zinc-300 rounded pl-3 pr-8 py-1.5 font-body-sm text-body-sm text-zinc-900 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 h-[32px] cursor-pointer shadow-sm">
+<option value="">All Sources</option>
+<option value="twitter">X (Twitter)</option>
+<option value="linkedin">LinkedIn</option>
+<option value="github">GitHub</option>
+</select>
+<span class="material-symbols-outlined absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 text-[16px] pointer-events-none" data-icon="arrow_drop_down">arrow_drop_down</span>
+</div>
+<button class="flex items-center gap-1.5 px-3 py-1.5 border border-zinc-300 rounded bg-white text-zinc-700 hover:bg-zinc-50 transition-colors h-[32px] font-body-sm text-body-sm shadow-sm shrink-0">
+<span class="material-symbols-outlined text-[16px]" data-icon="filter_list">filter_list</span>
+                        More Filters
+                    </button>
+</div>
+<div class="flex items-center gap-2 shrink-0">
+<button aria-label="Refresh" class="p-1.5 border border-zinc-300 rounded text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 transition-colors h-[32px] w-[32px] flex items-center justify-center bg-white shadow-sm">
+<span class="material-symbols-outlined text-[18px]" data-icon="refresh">refresh</span>
+</button>
+<button aria-label="Export CSV" class="flex items-center gap-1.5 px-3 py-1.5 border border-zinc-300 rounded text-zinc-700 hover:text-zinc-900 bg-white hover:bg-zinc-50 transition-colors h-[32px] font-body-sm text-body-sm shadow-sm">
+<span class="material-symbols-outlined text-[16px]" data-icon="download">download</span>
+                        Export
+                    </button>
+</div>
+</div>
+<!-- Data Table Container (Dense) -->
+<div class="flex-1 min-h-0 border border-zinc-200 rounded bg-white flex flex-col shadow-sm relative overflow-hidden">
+<!-- Table Header -->
+<div class="grid grid-cols-[40px_1fr_1.5fr_2fr_100px_1.5fr_80px_100px_120px] gap-4 px-4 py-2 border-b border-zinc-200 bg-zinc-50 sticky top-0 z-10">
+<div class="font-data-label text-data-label text-zinc-500 uppercase">Av</div>
+<div class="font-data-label text-data-label text-zinc-500 uppercase flex items-center gap-1 cursor-pointer hover:text-zinc-700">Handle <span class="material-symbols-outlined text-[14px]" data-icon="arrow_upward">arrow_upward</span></div>
+<div class="font-data-label text-data-label text-zinc-500 uppercase">Display Name</div>
+<div class="font-data-label text-data-label text-zinc-500 uppercase">Bio</div>
+<div class="font-data-label text-data-label text-zinc-500 uppercase text-right cursor-pointer hover:text-zinc-700">Followers</div>
+<div class="font-data-label text-data-label text-zinc-500 uppercase">Location</div>
+<div class="font-data-label text-data-label text-zinc-500 uppercase text-center">Verif</div>
+<div class="font-data-label text-data-label text-zinc-500 uppercase">Source</div>
+<div class="font-data-label text-data-label text-zinc-500 uppercase">Last Seen</div>
+</div>
+<!-- Table Body (Scrollable) -->
+<div class="flex-1 overflow-y-auto">
+<!-- Row 1 (Active/Selected) -->
+<div class="grid grid-cols-[40px_1fr_1.5fr_2fr_100px_1.5fr_80px_100px_120px] gap-4 px-4 py-1.5 items-center border-b border-zinc-100 hover:bg-amber-50/50 transition-colors h-[40px] bg-amber-50 border-l-2 border-l-amber-500 cursor-pointer" onclick="toggleDrawer()">
+<div><img class="w-6 h-6 rounded bg-zinc-100 object-cover border border-zinc-200" data-alt="Tiny profile avatar of a developer, tech environment, dark mode aesthetic" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBkcdxnaUXAGoFwGEQfUew0N26H5SHnZ_AZ-ZGzuUwL9ao0cSKgzw6lLnH67qk45wRCP6xoSMDG-js0U6I0egP6Vz2AuY5FX9FkdwjNjCTlRyWMGvMT8Phe5drQfP7DCxXESgtjN6kGGdn6XdnNPUBH3O7mJ2occHr-XvAioKCVW-jJcOwkpvk2hmdGayh0zIS-84p0AYBEBBj174mFrPupMaiANzkUZiDHEEpTPIVfQhqR20Iejmtw"/></div>
+<div class="font-data-mono text-data-mono text-amber-700 font-medium truncate">@alex_dev_99</div>
+<div class="font-body-sm text-body-sm text-zinc-900 truncate">Alex Mercer</div>
+<div class="font-body-sm text-body-sm text-zinc-600 truncate text-[12px]">Full stack dev building weird things. Formerly @bigcorp. Prev heavily into rust.</div>
+<div class="font-data-mono text-data-mono text-zinc-900 text-right">14,021</div>
+<div class="font-body-sm text-body-sm text-zinc-600 truncate flex items-center gap-1"><span class="material-symbols-outlined text-[14px] text-zinc-400" data-icon="location_on">location_on</span>SF / NYC</div>
+<div class="flex justify-center"><span class="material-symbols-outlined text-[16px] text-blue-500 icon-fill" data-icon="verified">verified</span></div>
+<div><span class="inline-flex items-center px-1.5 py-0.5 rounded bg-zinc-100 border border-zinc-200 text-[10px] font-data-label text-zinc-600">X (Twitter)</span></div>
+<div class="font-data-mono text-data-mono text-zinc-500 text-[11px]">2m ago</div>
+</div>
+<!-- Row 2 -->
+<div class="grid grid-cols-[40px_1fr_1.5fr_2fr_100px_1.5fr_80px_100px_120px] gap-4 px-4 py-1.5 items-center border-b border-zinc-100 hover:bg-zinc-50 transition-colors h-[40px] cursor-pointer">
+<div><img class="w-6 h-6 rounded bg-zinc-100 object-cover border border-zinc-200" data-alt="Tiny profile avatar of a designer, abstract colorful background, dark mode UI" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBhQYnhZgeJYXZ9AXR1UnyYZeJZ2pXWsCEss-t-mb36fdWlpZqwPSUnRKwjmpwZA0vHNUwK8YNwCHSyP1pnHw7-ck6DdmvrSK0FPc2Fbl08h2RLpC9zfl3zYb-rL2jjFmIO1n0iVGNh3ReOuwWTisdu3XiK6F6rLFOQFSyvjgxxQYMM_lvonGYzrtd-WLgPm_V7owEv49S9JHkjoj-iRNgpHgHgSjAIxpv4f9FP3Y05yXIIuX2dLQTD"/></div>
+<div class="font-data-mono text-data-mono text-zinc-700 truncate">@sarah_ui</div>
+<div class="font-body-sm text-body-sm text-zinc-900 truncate">Sarah Jenkins</div>
+<div class="font-body-sm text-body-sm text-zinc-500 truncate text-[12px]">Design Systems lead. Typography nerd. She/her.</div>
+<div class="font-data-mono text-data-mono text-zinc-900 text-right">8,405</div>
+<div class="font-body-sm text-body-sm text-zinc-600 truncate flex items-center gap-1"><span class="material-symbols-outlined text-[14px] text-zinc-400" data-icon="location_on">location_on</span>London, UK</div>
+<div class="flex justify-center"><span class="material-symbols-outlined text-[16px] text-zinc-400" data-icon="check_circle">check_circle</span></div>
+<div><span class="inline-flex items-center px-1.5 py-0.5 rounded bg-zinc-100 border border-zinc-200 text-[10px] font-data-label text-zinc-600">X (Twitter)</span></div>
+<div class="font-data-mono text-data-mono text-zinc-500 text-[11px]">15m ago</div>
+</div>
+<!-- Row 3 (Missing Data) -->
+<div class="grid grid-cols-[40px_1fr_1.5fr_2fr_100px_1.5fr_80px_100px_120px] gap-4 px-4 py-1.5 items-center border-b border-zinc-100 hover:bg-zinc-50 transition-colors h-[40px] cursor-pointer">
+<div><div class="w-6 h-6 rounded bg-zinc-100 border border-zinc-200 flex items-center justify-center"><span class="material-symbols-outlined text-[14px] text-zinc-400" data-icon="person">person</span></div></div>
+<div class="font-data-mono text-data-mono text-zinc-700 truncate">data_miner_x</div>
+<div class="font-body-sm text-body-sm text-zinc-400 italic truncate">Unknown</div>
+<div class="font-body-sm text-body-sm text-zinc-400 truncate text-[12px]">-</div>
+<div class="font-data-mono text-data-mono text-zinc-400 text-right">-</div>
+<div class="font-body-sm text-body-sm text-zinc-400 truncate">-</div>
+<div class="flex justify-center">-</div>
+<div><span class="inline-flex items-center px-1.5 py-0.5 rounded bg-zinc-100 border border-zinc-200 text-[10px] font-data-label text-zinc-600">LinkedIn</span></div>
+<div class="font-data-mono text-data-mono text-zinc-500 text-[11px]">1h ago</div>
+</div>
+<!-- Row 4 -->
+<div class="grid grid-cols-[40px_1fr_1.5fr_2fr_100px_1.5fr_80px_100px_120px] gap-4 px-4 py-1.5 items-center border-b border-zinc-100 hover:bg-zinc-50 transition-colors h-[40px] cursor-pointer">
+<div><img class="w-6 h-6 rounded bg-zinc-100 object-cover border border-zinc-200" data-alt="Tiny profile avatar of a robotic dog, technical matrix aesthetic" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBhJyxp1XuW0jI_oZ6YgiNVMSQ69ZZwYBKbg_Ky0DdPVP6BMQU2GmedP-LPAn4h_IA2yCOPjKLCd6D4wIRlprMr_5VjQnUp5H2VZ-6ntE67nwr9Z0yszemI3IhEuRvwU--0j6Qxd03QNq3blRXpFIhDmgTitBj1yvAzECV_zf8HCZH-iKtPbI8x9oFEZ2ieEyOnxUgW4mkFrLgtuu2ca5D3ALTXmUq17Cukrt3xNP8E-jO8KdCAS0Hd"/></div>
+<div class="font-data-mono text-data-mono text-zinc-700 truncate">@bot_watcher</div>
+<div class="font-body-sm text-body-sm text-zinc-900 truncate">Auto Tracker</div>
+<div class="font-body-sm text-body-sm text-zinc-500 truncate text-[12px]">Automated tracking of tech layoffs. Beep boop.</div>
+<div class="font-data-mono text-data-mono text-zinc-900 text-right">45,112</div>
+<div class="font-body-sm text-body-sm text-zinc-600 truncate flex items-center gap-1"><span class="material-symbols-outlined text-[14px] text-zinc-400" data-icon="language">language</span>Global</div>
+<div class="flex justify-center"><span class="material-symbols-outlined text-[16px] text-blue-500 icon-fill" data-icon="verified">verified</span></div>
+<div><span class="inline-flex items-center px-1.5 py-0.5 rounded bg-zinc-100 border border-zinc-200 text-[10px] font-data-label text-zinc-600">X (Twitter)</span></div>
+<div class="font-data-mono text-data-mono text-zinc-500 text-[11px]">3h ago</div>
+</div>
+</div>
+<!-- Pagination Footer -->
+<div class="border-t border-zinc-200 p-2 flex items-center justify-between bg-zinc-50 shrink-0">
+<div class="font-data-label text-data-label text-zinc-500">
+                        Showing 1-4 of 14,209
+                    </div>
+<div class="flex items-center gap-1">
+<button class="p-1 rounded hover:bg-zinc-200 text-zinc-400 cursor-not-allowed" disabled="">
+<span class="material-symbols-outlined text-[18px]" data-icon="chevron_left">chevron_left</span>
+</button>
+<div class="px-2 font-data-mono text-data-mono text-zinc-700">1 / 3,553</div>
+<button class="p-1 rounded hover:bg-zinc-200 text-zinc-600 hover:text-zinc-900 transition-colors cursor-pointer">
+<span class="material-symbols-outlined text-[18px]" data-icon="chevron_right">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Lead Detail Drawer (Overlay) -->
+<div class="absolute top-0 right-0 w-full sm:w-[400px] h-full bg-white border-l border-zinc-200 shadow-2xl transform translate-x-full transition-transform duration-300 z-40 flex flex-col" id="detailDrawer">
+<!-- Drawer Header -->
+<div class="flex items-center justify-between p-4 border-b border-zinc-200 bg-white shrink-0">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-amber-600 text-[20px]" data-icon="info">info</span>
+<h3 class="font-headline text-headline text-zinc-900">Lead Details</h3>
+</div>
+<button class="p-1 rounded hover:bg-zinc-100 text-zinc-500 hover:text-zinc-900 transition-colors" onclick="toggleDrawer()">
+<span class="material-symbols-outlined text-[20px]" data-icon="close">close</span>
+</button>
+</div>
+<!-- Drawer Content (Scrollable) -->
+<div class="flex-1 overflow-y-auto p-4 space-y-6 bg-zinc-50/50">
+<!-- Profile Header Card -->
+<div class="flex items-start gap-4">
+<img class="w-16 h-16 rounded border border-zinc-200 bg-white object-cover shadow-sm" data-alt="Profile avatar of a developer, tech environment, high-res, clean lighting, dark background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAJAQ1DVZyDqxjx2gApMGscbCqk8k3QcuqXHdjWWRTx11YuEbO2JtpbaD2G91C8z-8Er5d10Dv0FVXjg8WHhoYuF_91X2U3qrdhLfFSFYjG7T_lW7sm2Sn639wClw6c2DoonfYdFD9BWBOZ6Zt3imI0f7vN19apu2O-Q1ZcdVu4n3jrfCEOfNz3VPiQhDvwKqcBpNXDnuJLo9-4IUyqSkJQG5qqpOz80_k-OEXxMTKkr6balJ923dGI"/>
+<div class="flex-1 min-w-0">
+<div class="flex items-center justify-between gap-2">
+<h4 class="font-headline text-headline text-zinc-900 truncate">Alex Mercer</h4>
+<span class="material-symbols-outlined text-[16px] text-blue-500 icon-fill shrink-0" data-icon="verified">verified</span>
+</div>
+<p class="font-data-mono text-data-mono text-amber-700 font-medium truncate">@alex_dev_99</p>
+<div class="flex gap-2 mt-2">
+<span class="inline-flex items-center px-1.5 py-0.5 rounded bg-zinc-100 border border-zinc-200 text-[10px] font-data-label text-zinc-600">X (Twitter)</span>
+<span class="inline-flex items-center px-1.5 py-0.5 rounded bg-green-50 border border-green-200 text-[10px] font-data-label text-green-700">Active</span>
+</div>
+</div>
+</div>
+<!-- Stats Grid -->
+<div class="grid grid-cols-3 gap-2">
+<div class="bg-white p-2 rounded border border-zinc-200 flex flex-col items-center justify-center shadow-sm">
+<span class="font-data-label text-data-label text-zinc-500">FOLLOWERS</span>
+<span class="font-data-mono text-data-mono text-zinc-900 mt-1 font-medium">14,021</span>
+</div>
+<div class="bg-white p-2 rounded border border-zinc-200 flex flex-col items-center justify-center shadow-sm">
+<span class="font-data-label text-data-label text-zinc-500">FOLLOWING</span>
+<span class="font-data-mono text-data-mono text-zinc-900 mt-1 font-medium">843</span>
+</div>
+<div class="bg-white p-2 rounded border border-zinc-200 flex flex-col items-center justify-center shadow-sm">
+<span class="font-data-label text-data-label text-zinc-500">TWEETS</span>
+<span class="font-data-mono text-data-mono text-zinc-900 mt-1 font-medium">45.2K</span>
+</div>
+</div>
+<!-- Details List -->
+<div class="space-y-4">
+<div>
+<span class="block font-data-label text-data-label text-zinc-500 mb-1">BIO</span>
+<p class="font-body-sm text-body-sm text-zinc-700 bg-white p-3 rounded border border-zinc-200 shadow-sm leading-relaxed">
+                            Full stack dev building weird things. Formerly @bigcorp. Prev heavily into rust. Trying to make sense of AI. DMs open for contract work.
+                        </p>
+</div>
+<div class="grid grid-cols-2 gap-4">
+<div>
+<span class="block font-data-label text-data-label text-zinc-500 mb-1">LOCATION</span>
+<div class="flex items-center gap-1.5 font-body-sm text-body-sm text-zinc-800">
+<span class="material-symbols-outlined text-[16px] text-zinc-400" data-icon="location_on">location_on</span>
+                                SF / NYC
+                            </div>
+</div>
+<div>
+<span class="block font-data-label text-data-label text-zinc-500 mb-1">WEBSITE</span>
+<a class="flex items-center gap-1.5 font-body-sm text-body-sm text-blue-600 hover:text-blue-700 hover:underline truncate" href="#">
+<span class="material-symbols-outlined text-[16px] text-blue-500" data-icon="link">link</span>
+                                alexdev.io
+                            </a>
+</div>
+<div>
+<span class="block font-data-label text-data-label text-zinc-500 mb-1">JOINED</span>
+<div class="flex items-center gap-1.5 font-body-sm text-body-sm text-zinc-800">
+<span class="material-symbols-outlined text-[16px] text-zinc-400" data-icon="calendar_today">calendar_today</span>
+                                Mar 2011
+                            </div>
+</div>
+<div>
+<span class="block font-data-label text-data-label text-zinc-500 mb-1">LAST SEEN</span>
+<div class="flex items-center gap-1.5 font-data-mono text-data-mono text-zinc-800">
+<span class="material-symbols-outlined text-[16px] text-zinc-400" data-icon="history">history</span>
+                                2023-10-27 14:32Z
+                            </div>
+</div>
+</div>
+</div>
+<!-- Raw JSON Toggle (Technical Utility) -->
+<div class="border border-zinc-200 rounded overflow-hidden shadow-sm bg-white">
+<button class="w-full flex items-center justify-between p-3 bg-zinc-50 hover:bg-zinc-100 transition-colors text-left border-b border-zinc-200" onclick="document.getElementById('rawJson').classList.toggle('hidden')">
+<span class="font-data-label text-data-label text-zinc-700 font-medium">RAW PAYLOAD</span>
+<span class="material-symbols-outlined text-[18px] text-zinc-400" data-icon="code">code</span>
+</button>
+<div class="hidden p-3 bg-zinc-900" id="rawJson">
+<pre class="font-data-mono text-[11px] text-zinc-300 leading-relaxed overflow-x-auto">{
+  "id": "u_98412",
+  "handle": "alex_dev_99",
+  "name": "Alex Mercer",
+  "metrics": {
+    "followers": 14021,
+    "following": 843,
+    "tweets": 45201
+  },
+  "flags": ["verified", "developer"],
+  "extracted_at": "2023-10-27T14:32:00Z"
+}
+                        </pre>
+</div>
+</div>
+</div>
+<!-- Drawer Footer / Actions -->
+<div class="p-4 border-t border-zinc-200 bg-white shrink-0 flex gap-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+<button class="flex-1 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-body-base text-body-base font-medium rounded transition-colors flex items-center justify-center gap-2 shadow-sm">
+<span class="material-symbols-outlined text-[18px]" data-icon="person_add">person_add</span>
+                    Add to List
+                </button>
+<button class="px-4 py-2.5 border border-zinc-300 hover:bg-zinc-50 text-zinc-700 font-body-base text-body-base rounded transition-colors flex items-center justify-center shadow-sm">
+<span class="material-symbols-outlined text-[18px]" data-icon="open_in_new">open_in_new</span>
+</button>
+</div>
+</div>
+</main>
+<script>
+        function toggleDrawer() {
+            const drawer = document.getElementById('detailDrawer');
+            if (drawer.classList.contains('translate-x-full')) {
+                drawer.classList.remove('translate-x-full');
+                drawer.classList.add('translate-x-0');
+            } else {
+                drawer.classList.add('translate-x-full');
+                drawer.classList.remove('translate-x-0');
+            }
+        }
+    </script>
+</body></html>

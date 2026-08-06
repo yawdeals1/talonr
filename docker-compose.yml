@@ -1,0 +1,24 @@
+services:
+  api:
+    build: .
+    image: talonr:latest
+    command: ["node", "dist/server.js"]
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  worker:
+    build: .
+    image: talonr:latest
+    command: ["node", "dist/worker.js"]
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+    shm_size: "1gb"
+    restart: unless-stopped
