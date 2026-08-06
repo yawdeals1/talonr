@@ -48,8 +48,10 @@ npm run dev          # HTTP API on $PORT (default 3000)
 npm run dev:worker    # BullMQ scrape worker (needs Redis running)
 ```
 
-Both need `DATABASE_URL` and `REDIS_URL` reachable. Build for production with `npm run build`, then
-run `npm start` / `npm run start:worker`.
+Both need `DATABASE_URL` and `REDIS_URL` reachable. Build the API/worker for production with
+`npm run build:api`, then run `npm start` / `npm run start:worker`. (`npm run build` at the repo
+root builds the `frontend/` static site instead — used by the Cloudflare Worker/Pages deploy — the
+Docker image builds the API with `build:api`.)
 
 ## Connecting an X account (the login flow)
 
