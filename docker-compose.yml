@@ -13,8 +13,9 @@ services:
     restart: unless-stopped
 
   worker:
-    build: .
     image: talonr:latest
+    depends_on:
+      - api
     command: ["node", "dist/worker.js"]
     env_file:
       - ../.env
