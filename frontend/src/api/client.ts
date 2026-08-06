@@ -21,7 +21,10 @@ interface RequestOptions {
 }
 
 function buildUrl(path: string, query?: RequestOptions["query"]): string {
-  const url = new URL(`${API_BASE_URL}${path}`);
+  // Base is required for relative API_BASE_URL values (e.g. "/backend" in
+  // production) — new URL() throws on a relative string with no base.
+  // Absolute API_BASE_URL values (local dev overrides) are unaffected by it.
+  const url = new URL(`${API_BASE_URL}${path}`, window.location.origin);
   if (query) {
     for (const [key, value] of Object.entries(query)) {
       if (value !== undefined) url.searchParams.set(key, String(value));
