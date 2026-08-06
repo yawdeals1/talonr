@@ -4,6 +4,11 @@ import { z } from "zod";
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
+  // Internal Docker-network connection strings, when the VPS's compute stack and its
+  // raw Postgres/Redis containers share a network — preferred over the public-IP
+  // variants above when present, since they avoid a same-host NAT hairpin round trip.
+  DATABASE_URL_INTERNAL: z.string().min(1).optional(),
+  REDIS_URL_INTERNAL: z.string().min(1).optional(),
   JWT_SECRET: z.string().min(16),
   SESSION_ENCRYPTION_KEY: z.string().min(1),
   PORT: z.coerce.number().int().positive().default(3000),
