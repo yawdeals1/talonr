@@ -1,7 +1,6 @@
-// DIAGNOSTIC BUILD — temporarily proxies to a known-good HTTPS domain instead
-// of the VPS raw IP, to isolate whether the 403/1003 block is about the
-// inbound path, plain-HTTP origin, or raw-IP origin specifically.
-const BACKEND_ORIGIN = "https://example.com";
+// DIAGNOSTIC 2 — plain HTTP to a real domain (not an IP), to isolate whether
+// it's "plain HTTP" or "raw IP" specifically that's blocked.
+const BACKEND_ORIGIN = "http://example.com";
 const PUBLIC_PREFIX = "/backend";
 
 export default {
