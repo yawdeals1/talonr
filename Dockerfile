@@ -10,4 +10,4 @@ COPY src ./src
 
 RUN npm run build
 
-CMD ["node", "dist/server.js"]
+CMD ["npm", "run", "start"]

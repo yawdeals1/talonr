@@ -2,7 +2,7 @@ services:
   api:
     build: .
     image: talonr:latest
-    command: ["node", "dist/server.js"]
+    command: ["npm", "run", "start"]
     env_file:
       - ../.env
     environment:
@@ -16,7 +16,7 @@ services:
     image: talonr:latest
     depends_on:
       - api
-    command: ["node", "dist/worker.js"]
+    command: ["npm", "run", "start:worker"]
     env_file:
       - ../.env
     environment:
