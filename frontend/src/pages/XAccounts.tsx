@@ -1,0 +1,418 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useId, useState, type FormEvent } from "react";
+import { createAccount, deleteAccount, listAccounts, updateAccount } from "../api/accounts";
+import { ApiError } from "../api/client";
+import { listScrapes } from "../api/scrapes";
+import type { XAccount, XAccountStatus } from "../api/types";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { EmptyState } from "../components/EmptyState";
+import { Modal } from "../components/Modal";
+import { SkeletonCards } from "../components/Skeleton";
+import { StatusPill } from "../components/StatusPill";
+import { useAuth } from "../context/AuthContext";
+import { formatDateTime } from "../lib/format";
+
+function checkpointReasonFor(account: XAccount, jobs: { xAccountId: string; status: string; errorMessage: string | null }[]): string | null {
+  if (account.status !== "checkpointed") return null;
+  const relevant = jobs.find(
+    (j) => j.xAccountId === account.id && (j.status === "failed" || j.status === "paused") && j.errorMessage
+  );
+  return relevant?.errorMessage ?? null;
+}
+
+export function XAccounts() {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+
+  const accountsQuery = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
+  const scrapesQuery = useQuery({ queryKey: ["scrapes"], queryFn: () => listScrapes() });
+
+  const [showConnect, setShowConnect] = useState(false);
+  const [justConnected, setJustConnected] = useState<XAccount | null>(null);
+  const [editing, setEditing] = useState<XAccount | null>(null);
+  const [deleting, setDeleting] = useState<XAccount | null>(null);
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["accounts"] });
+
+  const createMutation = useMutation({
+    mutationFn: createAccount,
+    onSuccess: ({ account }) => {
+      invalidate();
+      setShowConnect(false);
+      setJustConnected(account);
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (input: { id: string; dailyScrapeLimit?: number; maxConcurrency?: number; status?: XAccountStatus }) =>
+      updateAccount(input.id, input),
+    onSuccess: () => {
+      invalidate();
+      setEditing(null);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteAccount,
+    onSuccess: () => {
+      invalidate();
+      setDeleting(null);
+    },
+  });
+
+  if (accountsQuery.isLoading) {
+    return <SkeletonCards count={4} />;
+  }
+
+  const accounts = accountsQuery.data?.accounts ?? [];
+  const jobs = scrapesQuery.data?.scrapeJobs ?? [];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">X Accounts</h1>
+        <button
+          type="button"
+          onClick={() => setShowConnect(true)}
+          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+        >
+          Connect Account
+        </button>
+      </div>
+
+      {accounts.length === 0 ? (
+        <EmptyState
+          title="No X accounts yet"
+          description="Connect an account to start running scrapes."
+          action={
+            <button
+              type="button"
+              onClick={() => setShowConnect(true)}
+              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+            >
+              Connect Account
+            </button>
+          }
+        />
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {accounts.map((account) => {
+            const reason = checkpointReasonFor(account, jobs);
+            return (
+              <div key={account.id} className="flex flex-col gap-3 rounded-lg border p-4">
+                <div className="flex items-start justify-between">
+                  <span className="font-mono text-sm font-medium">@{account.handle}</span>
+                  <StatusPill status={account.status} />
+                </div>
+
+                {!account.hasSession && (
+                  <p className="text-xs text-status-warning">Not connected yet — session not captured.</p>
+                )}
+
+                {reason && (
+                  <p className="rounded border border-status-warning-bg bg-status-warning-bg px-2 py-1 text-xs text-status-warning">
+                    {reason}
+                  </p>
+                )}
+
+                <dl className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs text-zinc-500">
+                  <dt>Daily limit</dt>
+                  <dd className="text-right font-mono">{account.dailyScrapeLimit}</dd>
+                  <dt>Max concurrency</dt>
+                  <dd className="text-right font-mono">{account.maxConcurrency}</dd>
+                  <dt>Last used</dt>
+                  <dd className="text-right font-mono">
+                    {account.lastUsedAt ? formatDateTime(account.lastUsedAt) : "—"}
+                  </dd>
+                </dl>
+
+                <div className="mt-auto flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditing(account)}
+                    className="flex-1 rounded-md border px-2 py-1.5 text-xs font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDeleting(account)}
+                    className="flex-1 rounded-md border px-2 py-1.5 text-xs font-medium text-status-danger hover:bg-status-danger-bg"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {showConnect && (
+        <ConnectAccountModal
+          onClose={() => setShowConnect(false)}
+          onSubmit={(input) => createMutation.mutate(input)}
+          error={createMutation.error instanceof ApiError ? createMutation.error.message : null}
+          submitting={createMutation.isPending}
+        />
+      )}
+
+      {justConnected && user && (
+        <FinishConnectingModal userId={user.id} account={justConnected} onClose={() => setJustConnected(null)} />
+      )}
+
+      {editing && (
+        <EditAccountModal
+          account={editing}
+          onClose={() => setEditing(null)}
+          onSubmit={(input) => updateMutation.mutate({ id: editing.id, ...input })}
+          error={updateMutation.error instanceof ApiError ? updateMutation.error.message : null}
+          submitting={updateMutation.isPending}
+        />
+      )}
+
+      {deleting && (
+        <ConfirmDialog
+          title="Delete account?"
+          message={`This permanently deletes @${deleting.handle} and cascades to its scrape jobs. This can't be undone.`}
+          onConfirm={() => deleteMutation.mutate(deleting.id)}
+          onCancel={() => setDeleting(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function ConnectAccountModal({
+  onClose,
+  onSubmit,
+  error,
+  submitting,
+}: {
+  onClose: () => void;
+  onSubmit: (input: { handle: string; dailyScrapeLimit?: number; maxConcurrency?: number }) => void;
+  error: string | null;
+  submitting: boolean;
+}) {
+  const [handle, setHandle] = useState("");
+  const [dailyScrapeLimit, setDailyScrapeLimit] = useState("");
+  const [maxConcurrency, setMaxConcurrency] = useState("");
+  const idPrefix = useId();
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    onSubmit({
+      handle: handle.replace(/^@/, ""),
+      dailyScrapeLimit: dailyScrapeLimit ? Number(dailyScrapeLimit) : undefined,
+      maxConcurrency: maxConcurrency ? Number(maxConcurrency) : undefined,
+    });
+  }
+
+  return (
+    <Modal title="Connect Account" onClose={onClose}>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label
+            htmlFor={`${idPrefix}-handle`}
+            className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+          >
+            X handle
+          </label>
+          <input
+            id={`${idPrefix}-handle`}
+            required
+            placeholder="handle (without @)"
+            value={handle}
+            onChange={(e) => setHandle(e.target.value)}
+            className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label
+              htmlFor={`${idPrefix}-daily-limit`}
+              className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+            >
+              Daily limit
+            </label>
+            <input
+              id={`${idPrefix}-daily-limit`}
+              type="number"
+              min={1}
+              placeholder="150"
+              value={dailyScrapeLimit}
+              onChange={(e) => setDailyScrapeLimit(e.target.value)}
+              className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor={`${idPrefix}-max-concurrency`}
+              className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+            >
+              Max concurrency
+            </label>
+            <input
+              id={`${idPrefix}-max-concurrency`}
+              type="number"
+              min={1}
+              placeholder="1"
+              value={maxConcurrency}
+              onChange={(e) => setMaxConcurrency(e.target.value)}
+              className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+          </div>
+        </div>
+        {error && <p className="text-sm text-status-danger">{error}</p>}
+        <button
+          type="submit"
+          disabled={submitting}
+          className="w-full rounded-md bg-accent py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+        >
+          {submitting ? "Adding…" : "Add account"}
+        </button>
+      </form>
+    </Modal>
+  );
+}
+
+function FinishConnectingModal({
+  userId,
+  account,
+  onClose,
+}: {
+  userId: string;
+  account: XAccount;
+  onClose: () => void;
+}) {
+  const command = `npm run login:x -- --userId ${userId} --handle ${account.handle}`;
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <Modal title="Finish connecting" onClose={onClose}>
+      <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
+        @{account.handle} has been added, but its X session hasn't been captured yet. X's login can't be
+        automated (2FA/captchas), so run this locally to open a browser window and log in as @{account.handle}:
+      </p>
+      <div className="mb-3 flex items-center justify-between gap-2 rounded-md border bg-zinc-50 px-3 py-2 font-mono text-xs dark:bg-zinc-800">
+        <code className="overflow-x-auto whitespace-nowrap">{command}</code>
+        <button
+          type="button"
+          onClick={() => {
+            navigator.clipboard.writeText(command);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          }}
+          className="shrink-0 rounded border px-2 py-1 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-700"
+        >
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <p className="mb-4 text-xs text-zinc-500">
+        Once you complete login in the opened window, this account flips to "active" automatically.
+      </p>
+      <button
+        type="button"
+        onClick={onClose}
+        className="w-full rounded-md border py-2 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800"
+      >
+        Done
+      </button>
+    </Modal>
+  );
+}
+
+function EditAccountModal({
+  account,
+  onClose,
+  onSubmit,
+  error,
+  submitting,
+}: {
+  account: XAccount;
+  onClose: () => void;
+  onSubmit: (input: { dailyScrapeLimit?: number; maxConcurrency?: number; status?: XAccountStatus }) => void;
+  error: string | null;
+  submitting: boolean;
+}) {
+  const [dailyScrapeLimit, setDailyScrapeLimit] = useState(String(account.dailyScrapeLimit));
+  const [maxConcurrency, setMaxConcurrency] = useState(String(account.maxConcurrency));
+  const [status, setStatus] = useState<XAccountStatus>(account.status);
+  const idPrefix = useId();
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    onSubmit({
+      dailyScrapeLimit: Number(dailyScrapeLimit),
+      maxConcurrency: Number(maxConcurrency),
+      status,
+    });
+  }
+
+  return (
+    <Modal title={`Edit @${account.handle}`} onClose={onClose}>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label
+              htmlFor={`${idPrefix}-daily-limit`}
+              className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+            >
+              Daily limit
+            </label>
+            <input
+              id={`${idPrefix}-daily-limit`}
+              type="number"
+              min={1}
+              value={dailyScrapeLimit}
+              onChange={(e) => setDailyScrapeLimit(e.target.value)}
+              className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor={`${idPrefix}-max-concurrency`}
+              className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+            >
+              Max concurrency
+            </label>
+            <input
+              id={`${idPrefix}-max-concurrency`}
+              type="number"
+              min={1}
+              value={maxConcurrency}
+              onChange={(e) => setMaxConcurrency(e.target.value)}
+              className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+          </div>
+        </div>
+        <div>
+          <label
+            htmlFor={`${idPrefix}-status`}
+            className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+          >
+            Status
+          </label>
+          <select
+            id={`${idPrefix}-status`}
+            value={status}
+            onChange={(e) => setStatus(e.target.value as XAccountStatus)}
+            className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+          >
+            <option value="active">active</option>
+            <option value="checkpointed">checkpointed</option>
+            <option value="banned">banned</option>
+          </select>
+        </div>
+        {error && <p className="text-sm text-status-danger">{error}</p>}
+        <button
+          type="submit"
+          disabled={submitting}
+          className="w-full rounded-md bg-accent py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+        >
+          {submitting ? "Saving…" : "Save changes"}
+        </button>
+      </form>
+    </Modal>
+  );
+}

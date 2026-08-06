@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+/* Class-based dark mode so the theme toggle can override the OS default;
+   ThemeContext still defaults to following prefers-color-scheme when the
+   user hasn't picked an explicit override. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
+
+  /*
+   * Status/accent TEXT colors are theme-aware (see :root / .dark below) — the
+   * 500-shade mid-tones read fine on near-black but fail WCAG AA (4.5:1) on
+   * white/light-tinted pill backgrounds. Measured: amber-500 on white is
+   * 2.15:1, emerald-500 2.54:1, blue-500 3.68:1. Light mode uses 700-shades
+   * (all >5:1 on white); dark mode keeps 500/400-shades (all >5:1 on zinc-950).
+   * -bg tokens stay a flat mid-shade tint since background tone isn't a
+   * contrast-critical value the way foreground text is.
+   */
+  --color-status-success: var(--color-emerald-700);
+  --color-status-success-bg: color-mix(in oklab, var(--color-emerald-500) 12%, transparent);
+  --color-status-warning: var(--color-amber-700);
+  --color-status-warning-bg: color-mix(in oklab, var(--color-amber-500) 12%, transparent);
+  --color-status-danger: var(--color-red-700);
+  --color-status-danger-bg: color-mix(in oklab, var(--color-red-500) 12%, transparent);
+  --color-status-neutral: var(--color-gray-600);
+  --color-status-neutral-bg: color-mix(in oklab, var(--color-gray-500) 12%, transparent);
+  /* "running" only — kept distinct from warning-amber (paused/checkpointed). */
+  --color-status-info: var(--color-blue-700);
+  --color-status-info-bg: color-mix(in oklab, var(--color-blue-500) 12%, transparent);
+
+  /*
+   * Single accent for primary actions / active states. amber-700 (not 600) so
+   * white button text clears 4.5:1 (measured 5.02:1; amber-600 was 3.19:1,
+   * an AA fail) — this value doesn't need a dark-mode override since it's a
+   * fixed foreground/background pair independent of page theme.
+   */
+  --color-accent: var(--color-amber-700);
+  --color-accent-emphasis: var(--color-amber-600);
+  /* Accent used AS body/link text (not a button fill) — needs its own
+     theme-aware value; amber-700 fails as dark-mode text (3.96:1 on zinc-950). */
+  --color-accent-text: var(--color-amber-700);
+
+  --spacing-sidebar: 240px;
+  --spacing-sidebar-collapsed: 64px;
+}
+
+:root {
+  color-scheme: light;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --color-status-success: var(--color-emerald-500);
+  --color-status-warning: var(--color-amber-500);
+  --color-status-danger: var(--color-red-500);
+  --color-status-neutral: var(--color-gray-400);
+  --color-status-info: var(--color-blue-500);
+  --color-accent-text: var(--color-amber-500);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  @apply bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100;
+}
+
+* {
+  border-color: var(--color-zinc-200);
+}
+
+.dark * {
+  border-color: var(--color-zinc-800);
+}
