@@ -25,8 +25,9 @@ function toAuthedUser(user: PublicUser): AuthedUser {
 // Every authenticated request would otherwise cost a network round trip to Deploro Auth
 // before doing anything else — this short-lived cache keeps that off the hot path for
 // back-to-back requests (dashboard polling, etc.) without meaningfully delaying role/status
-// changes made on the Deploro side.
-const SESSION_CACHE_TTL_MS = 60_000;
+// changes made on the Deploro side. Kept short deliberately: a revoked session or role change
+// (e.g. an admin banning a user) should take effect quickly, not up to a full minute later.
+const SESSION_CACHE_TTL_MS = 10_000;
 const sessionCache = new Map<string, { user: AuthedUser; expiresAt: number }>();
 
 async function resolveUser(token: string): Promise<AuthedUser> {

@@ -12,7 +12,8 @@ limits described below.
 
 ## Stack
 
-Node.js + TypeScript, Express, Drizzle ORM (Postgres), BullMQ + Redis, Playwright.
+Node.js + TypeScript, Express, Deploro Studio DB (REST-only Postgres API, no ORM/direct
+connection), Deploro Auth-as-a-Service (identity/credentials), BullMQ + Redis, Playwright.
 
 ## Setup
 
@@ -23,19 +24,23 @@ Node.js + TypeScript, Express, Drizzle ORM (Postgres), BullMQ + Redis, Playwrigh
    ```
 
 2. **Configure environment** — copy `.env.example` to `.env` and fill in:
-   - `DATABASE_URL` — your Postgres connection string (a Deploro-hosted instance, or any Postgres).
    - `REDIS_URL` — your Redis connection string, used by BullMQ.
-   - `JWT_SECRET` — a long random string.
+   - `DEPLORO_AUTH_BASE_URL` / `DEPLORO_PROJECT_SLUG` — Deploro's platform Worker hosting the
+     Auth-as-a-Service routes, and this project's slug.
+   - `DEPLORO_STUDIO_API_URL` / `DEPLORO_STUDIO_API_TOKEN` — Talonr's Studio DB REST base and a
+     project-scoped PAT (`deploro token create <name> --project talonr`).
    - `SESSION_ENCRYPTION_KEY` — 32 random bytes, base64-encoded. Generate with:
      ```
      openssl rand -base64 32
      ```
    - The rest have sane defaults (worker concurrency, per-account limits, scroll delay range).
+   - No `DATABASE_URL` — there is no direct Postgres connection anywhere in this app.
 
-3. **Run migrations**
+3. **Apply the schema** — not an npm script. Schema changes go through the `deploro` CLI directly
+   against the Studio DB:
    ```
-   npm run db:generate   # only needed after changing src/db/schema.ts
-   npm run db:migrate
+   deploro migrate create <name> --up-file <path> --down-file <path>
+   deploro migrate apply <name>
    ```
 
 ## Running it
@@ -48,7 +53,8 @@ npm run dev          # HTTP API on $PORT (default 3000)
 npm run dev:worker    # BullMQ scrape worker (needs Redis running)
 ```
 
-Both need `DATABASE_URL` and `REDIS_URL` reachable. Build the API/worker for production with
+Both need the Studio DB (`DEPLORO_STUDIO_API_URL`/`DEPLORO_STUDIO_API_TOKEN`) and `REDIS_URL`
+reachable. Build the API/worker for production with
 `npm run build:api`, then run `npm start` / `npm run start:worker`. (`npm run build` at the repo
 root builds the `frontend/` static site instead — used by the Cloudflare Worker/Pages deploy — the
 Docker image builds the API with `build:api`.)
@@ -73,7 +79,9 @@ scrape; no API response (including admin routes) ever returns it.
 
 ## Running a scrape
 
-1. Register/login to get a JWT (returned in the response body and also set as an httpOnly cookie).
+1. Register/login to get a session token (returned in the response body and also set as an httpOnly
+   cookie) — registration goes through Deploro Auth and requires clicking an emailed confirmation
+   link before the account can log in.
 2. Confirm the account has a captured session: `GET /api/accounts` → `hasSession: true`.
 3. Trigger a scrape:
    ```
@@ -99,10 +107,12 @@ or `banned` account can't be used to trigger new scrapes until manually set back
 
 ## Admin routes
 
-Promoting a user to admin is a manual DB action (no self-serve admin signup):
+Promoting a user to admin is a manual DB action (no self-serve admin signup). There's no raw SQL
+access (Studio DB is REST-only) — do it via the `deploro` CLI:
 
-```sql
-UPDATE users SET role = 'admin' WHERE email = 'you@example.com';
+```
+deploro db rows users                          # find the user's id
+deploro db update users <id> --data '{"role":"admin"}'
 ```
 
 Admins keep their own personal scope (own accounts/scrapes/leads) plus read-only cross-user routes:

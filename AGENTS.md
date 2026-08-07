@@ -13,20 +13,26 @@ interface violates X's Terms of Service — keep scrape volume conservative and 
 hardcode aggressive defaults, and auto-pause an account on captcha/login-challenge/rate-limit
 signals rather than retrying blindly.
 
-**No frontend code lives in this repo yet.** The UI is generated separately with Google Stitch from
-`SCREENS.md`. This backend exposes a REST API only. Stitch's generated design output (per-screen
-`code.html` + `screen.png`, dark variant plus a `*_light` counterpart for each, and a consolidated
-`talonr_operator_system/DESIGN.md` design system) is saved at
-`C:\Users\Caleb\OneDrive\Desktop\Talonr\stitch_talonr_operator_console` — this is the source design
-to build the real frontend from when that work starts.
+A React + Vite frontend lives in `frontend/` (built from the Google Stitch design output —
+per-screen `code.html` + `screen.png`, dark variant plus a `*_light` counterpart for each, and a
+consolidated `talonr_operator_system/DESIGN.md` design system — saved at
+`C:\Users\Caleb\OneDrive\Desktop\Talonr\stitch_talonr_operator_console`). It talks to this backend
+over the REST API only, using a Bearer token stored in `localStorage`
+(`frontend/src/lib/tokenStore.ts`) rather than relying on the `talonr_token` cookie. `npm run build`
+builds the frontend and copies its `dist/` into the root `dist/`, served by the same Worker deploy.
 
 ## Tech stack
 
 - Node.js + TypeScript (ESM, `"type": "module"`), Express 4
-- Drizzle ORM + drizzle-kit, Postgres (via `pg`)
+- Deploro's Studio DB — a REST-only, per-table Postgres API (`src/db/studio-client.ts`) — for all
+  persistence. Not a direct Postgres connection: no ORM, no raw SQL from the app, no `pg`. Schema
+  changes go through `deploro migrate create/apply` against the Studio DB, not a generated
+  migration file in this repo. See "Data model" below for the real constraints this implies.
 - BullMQ + ioredis for the job queue
 - Playwright (chromium) for scraping
-- JWT (jsonwebtoken) in an httpOnly cookie for auth, bcryptjs for password hashing
+- Deploro Auth-as-a-Service (email+password provider) for identity/credentials; Talonr's own
+  `users` table only holds local role + a pointer to the Deploro account, and never stores a
+  password itself
 - AES-256-GCM (Node's built-in `node:crypto`) for encrypting stored X session cookies and proxy
   credentials
 - zod for request validation, pino for logging
@@ -42,12 +48,13 @@ production.
 src/
 ├── config/env.ts                     # zod-validated env loader — single source of truth for config
 ├── db/
-│   ├── schema.ts                     # Drizzle tables + enums (6 tables) + FilterDefinition type
-│   ├── relations.ts                  # drizzle relations() for query joins
-│   ├── client.ts                     # pg Pool + drizzle() instance (`db`, `pool`)
-│   └── migrate.ts                    # programmatic migration runner (npm run db:migrate)
+│   ├── schema.ts                     # plain TS row interfaces (6 tables) + FilterDefinition — types only,
+│   │                                    no ORM object; the real schema lives in a `deploro migrate` migration
+│   └── studio-client.ts              # generic REST client for Deploro's Studio DB (list/get/insert/update/
+│                                        delete), camelCase<->snake_case conversion, studioListSorted() for
+│                                        client-side ordering (the Studio API has no ORDER BY)
 ├── modules/
-│   ├── auth/          routes, controller, service, middleware, jwt.ts, password.ts
+│   ├── auth/          routes, controller, service, middleware, deploro-auth.client.ts
 │   ├── accounts/       routes, controller, service       — X account CRUD, own-scoped
 │   ├── scrapes/        routes, controller, service       — trigger/list/detail/cancel scrape jobs
 │   ├── leads/           routes, controller, service       — read scraped leads + upsertLeads()
@@ -74,17 +81,37 @@ src/
 ├── server.ts                         # HTTP entrypoint
 └── worker.ts                         # BullMQ worker entrypoint
 scripts/login.ts                      # standalone headed-Playwright interactive X login capture
-drizzle/migrations/                   # generated SQL migrations (npm run db:generate)
 ```
 
 **Module convention**: every feature module follows `*.routes.ts` (Express Router, wires
 middleware) → `*.controller.ts` (parses/validates request with zod, calls service, shapes
-response) → `*.service.ts` (DB queries via Drizzle, business logic, always scoped by `userId` for
-non-admin paths — never trusts a client-supplied `userId`).
+response) → `*.service.ts` (Studio DB queries via `studio-client.ts`, business logic, always scoped
+by `userId` for non-admin paths — never trusts a client-supplied `userId`).
 
-## Data model (`src/db/schema.ts`)
+## Data model (`src/db/schema.ts` types; real schema applied via `deploro migrate`)
 
-- **users**: id (uuid), email (unique), password_hash, role (enum `user`|`admin`, default `user`), created_at
+**The Studio DB is a REST-only, per-table API — equality filters only, no ORDER BY, no bulk
+upsert, no joins.** This shapes several service functions in ways worth knowing before touching
+them:
+
+- No `ORDER BY` support at all → every list function sorts client-side via
+  `studioListSorted()` (pages through results up to a cap, then sorts in Node).
+- No bulk/upsert endpoint → `leads.service.ts#upsertLeads` does a bounded-concurrency (8) loop of
+  one GET (existence check by the `user_id`+`handle` unique key) + one POST-or-PATCH per lead,
+  instead of a single `INSERT ... ON CONFLICT`.
+- No range/ILIKE filters → `filter-query-builder.ts#buildFilterPredicate` evaluates bio-keyword,
+  follower-range, and location matching in-process against a capped, fetched set (equality filters
+  like `verifiedOnly`/`sourceType` still push down to shrink what's fetched first). Same for
+  `leads.service.ts#listLeads`'s handle substring search.
+- No ownership-aware `WHERE id = X AND user_id = Y` on a by-id lookup → every "fetch a row I own"
+  path is "fetch by id, then check `row.userId === userId` in code, else `NotFoundError`."
+
+Accepted trade-off for this project's scrape-volume-capped, personal scale — would not hold up
+against a large multi-tenant dataset.
+
+- **users**: id (uuid), email (unique), deploro_account_id (text, unique — the Deploro
+  Auth-as-a-Service account this row was auto-provisioned from), role (enum `user`|`admin`,
+  default `user`), created_at
 - **x_accounts**: id, user_id (FK→users, cascade), handle, encrypted_session (text, nullable —
   null until the login script runs), encrypted_proxy (text, nullable), status (enum
   `active`|`checkpointed`|`banned`, default `active`), daily_scrape_limit (int, default 150),
@@ -96,8 +123,8 @@ non-admin paths — never trusts a client-supplied `userId`).
 - **leads**: id, user_id (FK), handle, display_name, bio, followers (nullable int — see caveat
   below), location, verified (bool), profile_image, source_type, source_ref, first_seen_at,
   last_seen_at. Unique on (user_id, handle) — scrape ingestion (`leads.service.ts#upsertLeads`)
-  does a bulk `INSERT ... ON CONFLICT (user_id, handle) DO UPDATE SET ... = excluded.*` so
-  re-scraping refreshes fields + `last_seen_at` without touching `first_seen_at`.
+  does a bounded-concurrency get-then-insert-or-update loop per lead (see "Data model" intro above)
+  so re-scraping refreshes fields + `last_seen_at` without touching `first_seen_at`.
 - **lead_lists**: id, user_id (FK), name, filter_definition (jsonb:
   `{bioKeywords?: string[], minFollowers?: number, maxFollowers?: number, location?: string,
   verifiedOnly?: boolean}`), created_at
@@ -112,12 +139,36 @@ deliberately out of scope.
 
 ## Auth (`src/modules/auth/`)
 
-JWT (HS256, `JWT_SECRET`, 7-day expiry, claims `sub`/`email`/`role`) set as an httpOnly cookie
-(`talonr_token`); also accepted via `Authorization: Bearer <token>` for non-browser clients.
-`requireAuth` middleware (`auth.middleware.ts`) populates `req.user`; `requireAdmin` checks
-`req.user.role === 'admin'`. Registration (`POST /api/auth/register`) always forces `role: 'user'`
-— **promoting a user to admin is a manual DB action**: `UPDATE users SET role = 'admin' WHERE
-email = '...'`. Passwords hashed with bcryptjs, cost factor 12.
+Identity and credentials live in **Deploro Auth-as-a-Service** (email+password provider), not in
+Talonr's own database — Talonr's Express API is a thin backend proxy in front of it
+(`deploro-auth.client.ts` calls Deploro's platform Worker at
+`{DEPLORO_AUTH_BASE_URL}/auth/{DEPLORO_PROJECT_SLUG}/*` server-to-server; those endpoints have a
+CORS allowlist that only permits Deploro's own dashboard origins, so a browser can't call them
+directly from Talonr's deployed frontend).
+
+- `POST /api/auth/register` → calls Deploro's `email-password/signup`, returns `202 { message }`.
+  Deploro requires the user to click an emailed confirmation link before they can log in — there is
+  no instant-registration path, by Deploro's design.
+- `POST /api/auth/login` → calls Deploro's `email-password/login`, gets back a Deploro session
+  token, and returns `{ user, token }`. That token is set as the httpOnly `talonr_token` cookie
+  (kept for parity/non-browser clients) and also accepted via `Authorization: Bearer <token>` — the
+  deployed frontend uses the Bearer/`localStorage` path exclusively
+  (`frontend/src/lib/tokenStore.ts`).
+- `requireAuth` (`auth.middleware.ts`) validates that token against Deploro's `GET
+  /auth/{slug}/session` on every request (`auth.service.ts#validateAndSyncUser`), auto-provisioning
+  a local `users` row on first sight of a given `deploro_account_id` — that local row is the FK
+  anchor everywhere else (`x_accounts`, `scrape_jobs`, `leads`, `lead_lists`, `activity_log`) and
+  the only place `role` lives. A short in-memory TTL cache (~10s, in `auth.middleware.ts`) sits in
+  front of that Deploro round trip so it isn't on the hot path for every request. `requireAdmin`
+  checks `req.user.role === 'admin'` exactly as before — **promoting a user to admin is still a
+  manual DB action**: `UPDATE users SET role = 'admin' WHERE email = '...'`.
+- `POST /api/auth/logout` → best-effort revokes the Deploro session
+  (`deploro-auth.client.ts#revokeSession`) before clearing the local cookie.
+- `app.ts` also applies a default-deny gate ahead of the individual routers: every path under
+  `/api/` requires auth unless it's explicitly listed as public (`/api/health`,
+  `/api/auth/register|login|request-password-reset|reset-password`). Each router still calls
+  `requireAuth` itself too — the gate is a backstop against a future router forgetting to, not a
+  replacement for the per-router check.
 
 ## Session & proxy encryption (`src/lib/crypto.ts`, `src/scraper/session-store.ts`)
 
@@ -153,7 +204,13 @@ marked `paused` (terminal for the day, no retry storm). Real errors (network bli
 exceptions) use BullMQ's normal `attempts: 3` + exponential backoff (set in `queues.ts`'s
 `defaultJobOptions`). Captcha/login-challenge/rate-limit detection during a run
 (`isAccountHealthError`) sets the account to `checkpointed` and marks the job `paused` — terminal,
-no retry — per the safety requirement.
+no retry — per the safety requirement. A `checkpointed`/`banned` account can't be flipped straight
+back to `active` through `PATCH /accounts/:id` (`accounts.service.ts#updateAccount`) — that would
+let a user silently bypass the safety trip; resuming requires re-running the login script.
+
+Separately, `src/lib/rate-limit.ts` provides a Redis-backed request-rate limiter (same
+INCR+EXPIRE Lua pattern as `daily-quota.ts`) applied at the HTTP layer to the auth endpoints
+(brute-force/credential-stuffing protection) and to `POST /scrapes` (per-user request flooding).
 
 ## Scraper modules (`src/scraper/`)
 
@@ -167,7 +224,12 @@ handle, `page.mouse.wheel` scroll, random delay from `SCROLL_DELAY_MIN_MS`/`SCRO
 `detectors.ts#checkHealth` checks URL patterns (login/challenge/lockdown redirects), a captcha
 iframe selector, and rate-limit text on the page; `watchForRateLimitResponses` also listens for
 HTTP 429s. Source `sourceRef` semantics: `search` = raw keyword/query string, `followers` = target
-handle (without `@`), `likers` = full tweet URL (`/likes` is appended if missing).
+handle (without `@`), `likers` = full tweet URL (`/likes` is appended if missing). `sourceRef` is
+validated against an X handle/tweet-URL shape (`scraper/types.ts`'s `X_HANDLE_PATTERN`/
+`X_TWEET_URL_PATTERN`) both at job-creation time and again inside `followers.source.ts`/
+`likers.source.ts` — `buildUrl` feeds `page.goto()` directly inside the worker's authenticated
+Playwright session, so an unvalidated value there would let a user point the browser at an
+arbitrary URL (SSRF).
 
 ## REST API
 
@@ -177,8 +239,10 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | GET | /health | public | DB + Redis liveness check |
-| POST | /auth/register | public | Create user (role forced to `user`), sets JWT cookie |
-| POST | /auth/login | public | Verify credentials, sets JWT cookie |
+| POST | /auth/register | public | Create user via Deploro Auth (email confirmation required before login) |
+| POST | /auth/login | public | Verify credentials via Deploro Auth, sets httpOnly cookie + returns Bearer token |
+| POST | /auth/request-password-reset | public | Email a Deploro Auth password-reset link (anti-enumeration: always the same response) |
+| POST | /auth/reset-password | public | Consume a reset token, set a new password via Deploro Auth |
 | POST | /auth/logout | auth | Clears cookie |
 | GET | /auth/me | auth | Current user profile |
 | GET | /accounts | auth | List own x_accounts (status/limits only, never session data) |
@@ -198,7 +262,7 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 | PATCH | /lead-lists/:id | auth | Update name/filterDefinition |
 | DELETE | /lead-lists/:id | auth | Delete |
 | GET | /lead-lists/:id/leads | auth | Evaluate the filter against `leads` at read time, paginated |
-| GET | /admin/users | admin | All users (id, email, role, createdAt — never password_hash) |
+| GET | /admin/users | admin | All users (id, email, role, createdAt — never deploro_account_id) |
 | GET | /admin/users/:id/accounts | admin | That user's x_accounts, status/limits only |
 | GET | /admin/scrape-jobs | admin | Cross-user scrape jobs, filterable by `userId`/`status` |
 | GET | /admin/activity | admin | Cross-user activity_log, paginated, filterable by `userId`/`action` |
@@ -208,20 +272,26 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 ```
 dev / dev:worker        # tsx watch — local API / worker
 build / start / start:worker   # tsc build then run compiled dist/
-db:generate              # drizzle-kit generate — after changing src/db/schema.ts
-db:migrate                # runs drizzle/migrations/ against DATABASE_URL
-db:studio                  # drizzle-kit studio
 login:x                    # scripts/login.ts — interactive X session capture
 typecheck / lint          # tsc --noEmit / eslint .
 ```
 
+Schema changes are **not** an npm script — they're `deploro migrate create --up-file ... --down-file
+...` followed by `deploro migrate apply`, run against Talonr's Studio DB directly via the `deploro`
+CLI, not tracked as generated files in this repo.
+
 ## Env vars (see `.env.example`)
 
-`DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `SESSION_ENCRYPTION_KEY` (32 bytes, base64 — `openssl
-rand -base64 32`), `PORT`, `NODE_ENV`, `COOKIE_SECURE`, `ALLOWED_ORIGIN`, `WORKER_CONCURRENCY`,
-`DEFAULT_DAILY_SCRAPE_LIMIT`, `DEFAULT_MAX_CONCURRENCY_PER_ACCOUNT`, `SCRAPE_CAP_LEADS_DEFAULT`,
-`SCROLL_DELAY_MIN_MS`, `SCROLL_DELAY_MAX_MS`. All validated at boot by `src/config/env.ts` (zod) —
-the process throws immediately on an invalid/missing var rather than failing later.
+`REDIS_URL`, `SESSION_ENCRYPTION_KEY` (32 bytes, base64 — `openssl rand -base64 32`),
+`DEPLORO_AUTH_BASE_URL` (Deploro's platform Worker, hosting the Auth-as-a-Service routes),
+`DEPLORO_PROJECT_SLUG` (default `talonr`), `DEPLORO_STUDIO_API_URL` (Talonr's Studio DB REST base,
+`{DEPLORO_AUTH_BASE_URL}/api/projects/{id}/studio`), `DEPLORO_STUDIO_API_TOKEN` (a project-scoped
+Deploro PAT — `deploro token create <name> --project talonr`), `PORT`, `NODE_ENV`, `COOKIE_SECURE`,
+`ALLOWED_ORIGIN`, `WORKER_CONCURRENCY`, `DEFAULT_DAILY_SCRAPE_LIMIT`,
+`DEFAULT_MAX_CONCURRENCY_PER_ACCOUNT`, `SCRAPE_CAP_LEADS_DEFAULT`, `SCROLL_DELAY_MIN_MS`,
+`SCROLL_DELAY_MAX_MS`. All validated at boot by `src/config/env.ts` (zod) — the process throws
+immediately on an invalid/missing var rather than failing later. No `DATABASE_URL` — there is no
+direct Postgres connection anywhere in this app.
 
 ## Login flow
 
@@ -236,6 +306,23 @@ exact command.
 - No follower-count enrichment pass (would multiply scrape volume against X) — `leads.followers`
   is frequently null from list-view scraping.
 - No admin impersonation/session-switching — admin routes are strictly read-only cross-user views.
-- No refresh-token rotation — 7-day JWT expiry, re-login after that.
+- No refresh-token rotation — Deploro session tokens expire after 7 days, re-login after that.
 - `POST /scrapes/:id/cancel` can't hard-kill an in-flight Playwright run; it only removes
   not-yet-started (waiting/delayed) jobs from the queue.
+- Studio DB constraints (see "Data model" above) mean lead-list filtering and the leads
+  handle-search run in-process over a capped fetch rather than in SQL, and `upsertLeads` is N
+  bounded-concurrency REST calls instead of one bulk statement — both fine at this project's scale,
+  neither would scale to a large multi-tenant dataset. Same reason there's no database-level
+  tenant isolation (no RLS-equivalent on the Studio DB) — every ownership check is enforced only in
+  the Express service layer (`findOwnedOrThrow`-style patterns), with no DB-level backstop.
+- The VPS Postgres container this app used before the Studio DB migration is still provisioned and
+  running, unused, on the shared VPS — the `deploro` CLI has no delete/teardown route for VPS
+  Postgres or Redis specifically, only `vps deploy` for the compute stack as a whole.
+- The Worker-to-VPS hop (`worker.js`) is plaintext HTTP, not HTTPS — the VPS is shared across
+  multiple Deploro projects and its ports 80/443 already belong to the platform's own nginx, so a
+  per-project TLS-terminating reverse proxy (e.g. Caddy) can't bind the ports ACME validation
+  needs. A prior attempt at this (2026-08-07) failed with "address already in use" on :80 and
+  briefly broke the public route to the API until reverted. A real fix needs either an owned
+  domain with a DNS-01 challenge (no inbound port required), or a routing rule on the platform's
+  shared nginx forwarding ACME HTTP-01 challenges through to this project's container — neither is
+  achievable from this repo alone.

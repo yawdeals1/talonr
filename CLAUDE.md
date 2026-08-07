@@ -54,7 +54,7 @@ src/
 │                                        delete), camelCase<->snake_case conversion, studioListSorted() for
 │                                        client-side ordering (the Studio API has no ORDER BY)
 ├── modules/
-│   ├── auth/          routes, controller, service, middleware, jwt.ts, password.ts
+│   ├── auth/          routes, controller, service, middleware, deploro-auth.client.ts
 │   ├── accounts/       routes, controller, service       — X account CRUD, own-scoped
 │   ├── scrapes/        routes, controller, service       — trigger/list/detail/cancel scrape jobs
 │   ├── leads/           routes, controller, service       — read scraped leads + upsertLeads()
@@ -223,8 +223,10 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | GET | /health | public | DB + Redis liveness check |
-| POST | /auth/register | public | Create user (role forced to `user`), sets JWT cookie |
-| POST | /auth/login | public | Verify credentials, sets JWT cookie |
+| POST | /auth/register | public | Create user via Deploro Auth (email confirmation required before login) |
+| POST | /auth/login | public | Verify credentials via Deploro Auth, sets httpOnly cookie + returns Bearer token |
+| POST | /auth/request-password-reset | public | Email a Deploro Auth password-reset link (anti-enumeration: always the same response) |
+| POST | /auth/reset-password | public | Consume a reset token, set a new password via Deploro Auth |
 | POST | /auth/logout | auth | Clears cookie |
 | GET | /auth/me | auth | Current user profile |
 | GET | /accounts | auth | List own x_accounts (status/limits only, never session data) |
@@ -244,7 +246,7 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 | PATCH | /lead-lists/:id | auth | Update name/filterDefinition |
 | DELETE | /lead-lists/:id | auth | Delete |
 | GET | /lead-lists/:id/leads | auth | Evaluate the filter against `leads` at read time, paginated |
-| GET | /admin/users | admin | All users (id, email, role, createdAt — never password_hash) |
+| GET | /admin/users | admin | All users (id, email, role, createdAt — never deploro_account_id) |
 | GET | /admin/users/:id/accounts | admin | That user's x_accounts, status/limits only |
 | GET | /admin/scrape-jobs | admin | Cross-user scrape jobs, filterable by `userId`/`status` |
 | GET | /admin/activity | admin | Cross-user activity_log, paginated, filterable by `userId`/`action` |

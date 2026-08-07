@@ -9,6 +9,7 @@ import { errorHandler } from "./lib/errors.js";
 import { logger } from "./lib/logger.js";
 import { accountsRouter } from "./modules/accounts/accounts.routes.js";
 import { adminRouter } from "./modules/admin/admin.routes.js";
+import { requireAuth, type AuthedRequest } from "./modules/auth/auth.middleware.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
 import { leadListsRouter } from "./modules/lead-lists/lead-lists.routes.js";
 import { leadsRouter } from "./modules/leads/leads.routes.js";
@@ -32,6 +33,32 @@ app.get("/api/health", async (_req, res) => {
     logger.error({ err }, "health check failed");
     res.status(503).json({ status: "unavailable" });
   }
+});
+
+// Default-deny backstop: every module router below already calls `router.use(requireAuth)`
+// itself, but that means a future router mounted here without remembering to add it would be
+// silently public. This gate makes auth the default for anything under /api/* except the
+// explicit public paths, so a missing per-router check fails closed instead of open. The
+// per-router checks stay in place too — requireAuth is idempotent (cheap cache hit on the
+// second call), so this is pure defense in depth, not a behavior change for existing routes.
+const PUBLIC_API_PATHS = [
+  "/api/health",
+  "/api/auth/register",
+  "/api/auth/login",
+  "/api/auth/request-password-reset",
+  "/api/auth/reset-password",
+];
+
+function isPublicApiPath(path: string): boolean {
+  return PUBLIC_API_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
+}
+
+app.use((req, res, next) => {
+  if (!req.path.startsWith("/api/") || isPublicApiPath(req.path)) {
+    next();
+    return;
+  }
+  requireAuth(req as AuthedRequest, res, next);
 });
 
 app.use("/api/auth", authRouter);
