@@ -32,6 +32,13 @@ function buildUrl(path: string, query?: RequestOptions["query"]): string {
   return url.toString();
 }
 
+// Same resolution as apiFetch, exposed for the rare case something outside apiFetch needs the
+// fully-qualified URL — e.g. embedding a copy-pasteable command for a script that runs outside the
+// browser (scripts/login.ts) and so can't rely on relative paths or credentials: "include".
+export function absoluteApiUrl(path: string): string {
+  return buildUrl(path);
+}
+
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = {};
   if (options.body !== undefined) headers["Content-Type"] = "application/json";

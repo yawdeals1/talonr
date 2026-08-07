@@ -1,6 +1,8 @@
 import { studioDelete, studioGet, studioInsert, studioList, studioUpdate } from "../../db/studio-client.js";
 import type { XAccount } from "../../db/schema.js";
+import { issueConnectToken, type ConnectToken } from "../../lib/connect-token.js";
 import { NotFoundError, ValidationError } from "../../lib/errors.js";
+import { encryptProxy, encryptSession, type ProxyConfig } from "../../scraper/session-store.js";
 
 export interface PublicXAccount {
   id: string;
@@ -84,4 +86,31 @@ export async function updateAccount(
 export async function deleteAccount(userId: string, accountId: string): Promise<void> {
   await findOwnedOrThrow(userId, accountId);
   await studioDelete("x_accounts", accountId);
+}
+
+// Mints a token scripts/login.ts can use in place of a Deploro session — that script runs on
+// whatever machine the account owner is on, which may never have this repo, its .env, or its
+// Studio DB / encryption secrets. Ownership-checked here at issue time so the token itself is the
+// only thing that ever needs to travel to that machine.
+export async function getConnectToken(userId: string, accountId: string): Promise<ConnectToken> {
+  await findOwnedOrThrow(userId, accountId);
+  return issueConnectToken(userId, accountId);
+}
+
+// Called by scripts/login.ts after a manual X login, authenticated by a connect token rather than
+// a Deploro session. userId/accountId here come from that token's verified claims, not from the
+// request body, so a forged or reused body can't redirect the write to a different account.
+export async function saveAccountSession(
+  userId: string,
+  accountId: string,
+  input: { storageState: object; proxy?: ProxyConfig | null }
+): Promise<PublicXAccount> {
+  const existing = await findOwnedOrThrow(userId, accountId);
+  const account = await studioUpdate<XAccount>("x_accounts", existing.id, {
+    encryptedSession: encryptSession(input.storageState),
+    encryptedProxy: input.proxy ? encryptProxy(input.proxy) : existing.encryptedProxy,
+    status: "active",
+    lastUsedAt: new Date(),
+  });
+  return toPublic(account);
 }

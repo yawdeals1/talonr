@@ -62,17 +62,28 @@ Docker image builds the API with `build:api`.)
 ## Connecting an X account (the login flow)
 
 X login can't be automated headlessly (2FA, captchas), so session capture is a local, interactive
-script — not an API call:
+script — not an API call. It's a standalone file (`scripts/login.ts`): no import from the rest of
+this repo, no `.env`, no `DEPLORO_STUDIO_API_TOKEN` or `SESSION_ENCRYPTION_KEY`. That matters
+because most Talonr users are *not* the operator running this repo — they're someone who signed up
+on the deployed frontend and has none of those secrets, possibly not even a clone of this repo.
+
+The normal path is entirely through the web app: add an account, then the "Finish connecting"
+dialog gives you a **Download talonr-login.ts** link and a ready-to-run command with a short-lived
+(15 min), single-account connect token baked in:
 
 ```
-npm run login:x -- --userId <your-user-uuid> --handle <x-handle> [--proxy http://user:pass@host:port]
+npm install playwright   # once
+npx tsx talonr-login.ts --endpoint <url> --token <connect-token> --handle <x-handle> \
+  [--proxy http://user:pass@host:port]
 ```
 
-This opens a real (headed) Chromium window. Log in manually, complete any 2FA/captcha, and once
-you land on `x.com/home` the script captures the session (cookies + storage), encrypts it with
-`SESSION_ENCRYPTION_KEY`, and upserts an `x_accounts` row for that user/handle — creating the row
-if it doesn't exist yet, or refreshing its session if it does. Get your user UUID from
-`POST /api/auth/register` or `GET /api/auth/me`.
+This opens a real (headed) Chromium window. Log in manually, complete any 2FA/captcha, and once you
+land on `x.com/home` the script captures the session (cookies + storage) and POSTs it to `POST
+/api/accounts/session`, authenticated by the connect token rather than a login session. The server
+encrypts it with `SESSION_ENCRYPTION_KEY` and updates the `x_accounts` row the token was scoped to
+— the script itself never touches that key. If you're the operator working locally, `npm run
+login:x -- --endpoint <url> --token <connect-token> --handle <x-handle>` runs the same file as a
+convenience wrapper.
 
 The encrypted session is only ever decrypted inside the worker process, right before launching a
 scrape; no API response (including admin routes) ever returns it.

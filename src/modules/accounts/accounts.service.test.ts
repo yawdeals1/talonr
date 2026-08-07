@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { XAccount } from "../../db/schema.js";
 import { NotFoundError } from "../../lib/errors.js";
-import { deleteAccount, getAccount, updateAccount } from "./accounts.service.js";
+import { deleteAccount, getAccount, getConnectToken, saveAccountSession, updateAccount } from "./accounts.service.js";
 
 // There's no database-level tenant isolation (RLS) on Deploro's Studio DB — every "fetch a row I
 // own" path is enforced purely in this service layer (findOwnedOrThrow-style checks). These tests
@@ -73,5 +73,37 @@ describe("accounts.service ownership isolation", () => {
   it("getAccount: a nonexistent id gets NotFoundError, not a crash", async () => {
     studioGet.mockResolvedValue(null);
     await expect(getAccount(OWNER, "does-not-exist")).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("getConnectToken: a different user cannot mint a token for someone else's account", async () => {
+    studioGet.mockResolvedValue(ownedAccount);
+    await expect(getConnectToken(ATTACKER, ACCOUNT_ID)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("getConnectToken: the owner gets a token scoped to their own account", async () => {
+    studioGet.mockResolvedValue(ownedAccount);
+    const result = await getConnectToken(OWNER, ACCOUNT_ID);
+    expect(result.token).toEqual(expect.any(String));
+    expect(result.expiresAt).toEqual(expect.any(String));
+  });
+
+  it("saveAccountSession: a different user's claimed userId cannot write another user's account", async () => {
+    studioGet.mockResolvedValue(ownedAccount);
+    await expect(
+      saveAccountSession(ATTACKER, ACCOUNT_ID, { storageState: {} })
+    ).rejects.toBeInstanceOf(NotFoundError);
+    expect(studioUpdate).not.toHaveBeenCalled();
+  });
+
+  it("saveAccountSession: the owner's session write updates the account and flips it active", async () => {
+    studioGet.mockResolvedValue(ownedAccount);
+    studioUpdate.mockResolvedValue({ ...ownedAccount, status: "active", encryptedSession: "v1.a.b.c" });
+    const result = await saveAccountSession(OWNER, ACCOUNT_ID, { storageState: { cookies: [] } });
+    expect(result.hasSession).toBe(true);
+    expect(studioUpdate).toHaveBeenCalledWith(
+      "x_accounts",
+      ACCOUNT_ID,
+      expect.objectContaining({ status: "active" })
+    );
   });
 });

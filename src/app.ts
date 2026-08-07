@@ -47,6 +47,11 @@ const PUBLIC_API_PATHS = [
   "/api/auth/login",
   "/api/auth/request-password-reset",
   "/api/auth/reset-password",
+  // Not actually unauthenticated — scripts/login.ts posts here with a short-lived, account-scoped
+  // connect token (see lib/connect-token.ts) instead of a Deploro session, since it runs on
+  // whatever machine the account owner is on. "Public" only in the sense that this backstop's
+  // Deploro-session check doesn't apply; accounts.controller.ts#saveSession still verifies it.
+  "/api/accounts/session",
 ];
 
 function isPublicApiPath(path: string): boolean {

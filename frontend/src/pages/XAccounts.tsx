@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState, type FormEvent } from "react";
-import { createAccount, deleteAccount, listAccounts, updateAccount } from "../api/accounts";
-import { ApiError } from "../api/client";
+import { createAccount, deleteAccount, getConnectToken, listAccounts, updateAccount } from "../api/accounts";
+import { absoluteApiUrl, ApiError } from "../api/client";
 import { listScrapes } from "../api/scrapes";
 import type { XAccount, XAccountStatus } from "../api/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -9,7 +9,6 @@ import { EmptyState } from "../components/EmptyState";
 import { Modal } from "../components/Modal";
 import { SkeletonCards } from "../components/Skeleton";
 import { StatusPill } from "../components/StatusPill";
-import { useAuth } from "../context/AuthContext";
 import { formatDateTime } from "../lib/format";
 
 function checkpointReasonFor(account: XAccount, jobs: { xAccountId: string; status: string; errorMessage: string | null }[]): string | null {
@@ -21,7 +20,6 @@ function checkpointReasonFor(account: XAccount, jobs: { xAccountId: string; stat
 }
 
 export function XAccounts() {
-  const { user } = useAuth();
   const queryClient = useQueryClient();
 
   const accountsQuery = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
@@ -109,6 +107,16 @@ export function XAccounts() {
                   <p className="text-xs text-status-warning">Not connected yet — session not captured.</p>
                 )}
 
+                {(!account.hasSession || reason) && (
+                  <button
+                    type="button"
+                    onClick={() => setJustConnected(account)}
+                    className="rounded-md border border-accent px-2 py-1.5 text-xs font-medium text-accent hover:bg-accent/10"
+                  >
+                    {reason ? "Reconnect" : "Finish connecting"}
+                  </button>
+                )}
+
                 {reason && (
                   <p className="rounded border border-status-warning-bg bg-status-warning-bg px-2 py-1 text-xs text-status-warning">
                     {reason}
@@ -157,8 +165,8 @@ export function XAccounts() {
         />
       )}
 
-      {justConnected && user && (
-        <FinishConnectingModal userId={user.id} account={justConnected} onClose={() => setJustConnected(null)} />
+      {justConnected && (
+        <FinishConnectingModal account={justConnected} onClose={() => setJustConnected(null)} />
       )}
 
       {editing && (
@@ -276,41 +284,70 @@ function ConnectAccountModal({
   );
 }
 
-function FinishConnectingModal({
-  userId,
-  account,
-  onClose,
-}: {
-  userId: string;
-  account: XAccount;
-  onClose: () => void;
-}) {
-  const command = `npm run login:x -- --userId ${userId} --handle ${account.handle}`;
+function FinishConnectingModal({ account, onClose }: { account: XAccount; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
+  const tokenQuery = useQuery({
+    queryKey: ["connect-token", account.id],
+    queryFn: () => getConnectToken(account.id),
+    staleTime: 0,
+    gcTime: 0,
+  });
+
+  const scriptUrl = absoluteApiUrl("/accounts/login-script");
+  const endpoint = absoluteApiUrl("/accounts/session");
+  const command = tokenQuery.data
+    ? `npx tsx talonr-login.ts --endpoint ${endpoint} --token ${tokenQuery.data.token} --handle ${account.handle}`
+    : null;
 
   return (
     <Modal title="Finish connecting" onClose={onClose}>
       <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
         @{account.handle} has been added, but its X session hasn't been captured yet. X's login can't be
-        automated (2FA/captchas), so run this locally to open a browser window and log in as @{account.handle}:
+        automated (2FA/captchas), so this runs on your own machine as a standalone script — it only needs
+        Node.js and Playwright, not this project's source or server secrets.
       </p>
-      <div className="mb-3 flex items-center justify-between gap-2 rounded-md border bg-zinc-50 px-3 py-2 font-mono text-xs dark:bg-zinc-800">
-        <code className="overflow-x-auto whitespace-nowrap">{command}</code>
-        <button
-          type="button"
-          onClick={() => {
-            navigator.clipboard.writeText(command);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-          }}
-          className="shrink-0 rounded border px-2 py-1 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-700"
-        >
-          {copied ? "Copied" : "Copy"}
-        </button>
-      </div>
-      <p className="mb-4 text-xs text-zinc-500">
-        Once you complete login in the opened window, this account flips to "active" automatically.
-      </p>
+
+      <ol className="mb-3 list-decimal space-y-1.5 pl-4 text-sm text-zinc-600 dark:text-zinc-400">
+        <li>
+          <a href={scriptUrl} download="talonr-login.ts" className="text-accent underline">
+            Download talonr-login.ts
+          </a>
+          , then once: <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-xs dark:bg-zinc-800">npm install playwright</code>
+        </li>
+        <li>Run the command below to open a browser window and log in as @{account.handle}:</li>
+      </ol>
+
+      {tokenQuery.isLoading && <p className="mb-3 text-xs text-zinc-500">Generating a connect token…</p>}
+      {tokenQuery.isError && (
+        <p className="mb-3 text-xs text-status-danger">
+          Couldn't generate a connect token — close and reopen this dialog to retry.
+        </p>
+      )}
+
+      {command && tokenQuery.data && (
+        <>
+          <div className="mb-1 flex items-center justify-between gap-2 rounded-md border bg-zinc-50 px-3 py-2 font-mono text-xs dark:bg-zinc-800">
+            <code className="overflow-x-auto whitespace-nowrap">{command}</code>
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard.writeText(command);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              }}
+              className="shrink-0 rounded border px-2 py-1 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-700"
+            >
+              {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+          <p className="mb-4 text-xs text-zinc-500">
+            This token expires at {new Date(tokenQuery.data.expiresAt).toLocaleTimeString()} and only authorizes
+            writing back a session for this account — reopen this dialog for a fresh one if it lapses. Once you
+            complete login in the opened window, this account flips to "active" automatically.
+          </p>
+        </>
+      )}
+
       <button
         type="button"
         onClick={onClose}

@@ -166,6 +166,8 @@ directly from Talonr's deployed frontend).
   manual DB action**: `UPDATE users SET role = 'admin' WHERE email = '...'`.
 - `POST /api/auth/logout` → best-effort revokes the Deploro session
   (`deploro-auth.client.ts#revokeSession`) before clearing the local cookie.
+- One route, `POST /api/accounts/session`, deliberately doesn't use any of the above — see "Login
+  flow" below for why and how it's still authenticated.
 
 ## Session & proxy encryption (`src/lib/crypto.ts`, `src/scraper/session-store.ts`)
 
@@ -232,8 +234,11 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 | POST | /auth/logout | auth | Clears cookie |
 | GET | /auth/me | auth | Current user profile |
 | GET | /accounts | auth | List own x_accounts (status/limits only, never session data) |
-| POST | /accounts | auth | Create an x_account row (handle + optional limits) — session is captured separately via `npm run login:x` |
+| POST | /accounts | auth | Create an x_account row (handle + optional limits) — session is captured separately via `scripts/login.ts` |
 | GET | /accounts/:id | auth | Own account detail |
+| GET | /accounts/:id/connect-token | auth | Mint a short-lived (15 min), account-scoped connect token for `scripts/login.ts` |
+| GET | /accounts/login-script | auth | Download `scripts/login.ts` as a standalone file (no repo checkout needed) |
+| POST | /accounts/session | connect token | `scripts/login.ts` posts a captured `storageState`/proxy back here, authenticated by the connect token instead of a Deploro session — listed in `app.ts`'s `PUBLIC_API_PATHS` for that reason, not because it's actually open |
 | PATCH | /accounts/:id | auth | Update dailyScrapeLimit / maxConcurrency / status |
 | DELETE | /accounts/:id | auth | Delete own account (cascades scrape_jobs) |
 | POST | /scrapes | auth | Create a scrape_jobs row + enqueue BullMQ job (`xAccountId`, `sourceType`, `sourceRef`, `capLeads?`) |
@@ -258,7 +263,8 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 ```
 dev / dev:worker        # tsx watch — local API / worker
 build / start / start:worker   # tsc build then run compiled dist/
-login:x                    # scripts/login.ts — interactive X session capture
+login:x                    # scripts/login.ts — interactive X session capture (operator convenience wrapper;
+                              # the script itself is a standalone file any account owner can run — see "Login flow")
 typecheck / lint          # tsc --noEmit / eslint .
 ```
 
@@ -281,11 +287,23 @@ direct Postgres connection anywhere in this app.
 
 ## Login flow
 
-X login can't be automated headlessly (2FA/captchas). `scripts/login.ts` launches a **headed**
-Playwright browser locally, waits for manual login, captures `context.storageState()`, encrypts it
-(plus any `--proxy` credentials) via `session-store.ts`, and upserts directly into `x_accounts`
-using the same `db` client and `lib/crypto.ts` as the app — no HTTP round trip. See README for the
-exact command.
+X login can't be automated headlessly (2FA/captchas), so it has to run on whatever machine the
+account owner is at — which, for any user besides the operator, means a machine with no checkout
+of this repo and no access to `DEPLORO_STUDIO_API_TOKEN` or `SESSION_ENCRYPTION_KEY`.
+`scripts/login.ts` is written to that constraint: it has **zero internal imports** — no
+`studio-client.ts`, no `lib/crypto.ts`, no `session-store.ts` — only `playwright` and the network.
+It launches a **headed** Playwright browser, waits for manual login, captures
+`context.storageState()`, and POSTs it (plus any `--proxy` credentials) as JSON to `POST
+/api/accounts/session`, authenticated with a connect token instead of a Deploro session.
+
+The web app's "Finish connecting" screen (`frontend/src/pages/XAccounts.tsx`) is the actual
+distribution path: it calls `GET /accounts/:id/connect-token` to mint a token scoped to that one
+account (`lib/connect-token.ts` — HMAC-signed, 15-minute TTL, verified server-side in
+`accounts.controller.ts#saveSession`, never persisted), and links to `GET /accounts/login-script`
+to download `scripts/login.ts` itself as a plain file. Encryption still only ever happens
+server-side in `accounts.service.ts#saveAccountSession` (via `session-store.ts`) — the script never
+sees `SESSION_ENCRYPTION_KEY` and the raw `storageState` only exists in transit over that one POST.
+`npm run login:x` still works locally as a convenience wrapper around the same file.
 
 ## Known limitations / non-goals
 

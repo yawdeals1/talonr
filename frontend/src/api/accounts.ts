@@ -32,3 +32,12 @@ export function updateAccount(id: string, input: UpdateAccountInput): Promise<{ 
 export function deleteAccount(id: string): Promise<void> {
   return apiFetch(`/accounts/${id}`, { method: "DELETE" });
 }
+
+export interface ConnectToken {
+  token: string;
+  expiresAt: string;
+}
+
+export function getConnectToken(id: string): Promise<ConnectToken> {
+  return apiFetch(`/accounts/${id}/connect-token`);
+}

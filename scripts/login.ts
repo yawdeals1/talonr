@@ -1,31 +1,48 @@
 /**
- * Interactive X login capture — must run locally with a real display (headless servers can't
- * complete a manual login/2FA/captcha flow).
+ * Interactive X login capture — runs standalone: only needs Node 20+, the `playwright` package,
+ * and network access to a running Talonr deployment. Deliberately does NOT need this repo checked
+ * out, this project's .env, or its Studio DB / encryption secrets — those belong to the operator,
+ * not to whichever user is connecting their own X account. Authentication is a short-lived,
+ * account-scoped connect token minted by the web app's "Finish connecting" screen (which also
+ * gives you --endpoint and --token), verified server-side in accounts.controller.ts#saveSession.
+ * You can copy just this file to a machine with no access to the rest of the repo and run it with
+ * `npm install playwright && npx tsx login.ts ...`.
  *
  * Usage:
- *   npm run login:x -- --userId <uuid> --handle <handle> [--proxy http://user:pass@host:port]
+ *   npx tsx login.ts --endpoint <url> --token <connect-token> --handle <handle> \
+ *     [--proxy http://user:pass@host:port]
  */
 import { chromium } from "playwright";
-import { studioInsert, studioList, studioUpdate } from "../src/db/studio-client.js";
-import type { XAccount } from "../src/db/schema.js";
-import { encryptProxy, encryptSession, type ProxyConfig } from "../src/scraper/session-store.js";
 
 interface Args {
-  userId: string;
+  endpoint: string;
+  token: string;
   handle: string;
   proxy?: string;
+}
+
+interface ProxyConfig {
+  server: string;
+  username?: string;
+  password?: string;
 }
 
 function parseArgs(argv: string[]): Args {
   const out: Partial<Args> = {};
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === "--userId") out.userId = argv[++i];
+    if (arg === "--endpoint") out.endpoint = argv[++i];
+    else if (arg === "--token") out.token = argv[++i];
     else if (arg === "--handle") out.handle = argv[++i];
     else if (arg === "--proxy") out.proxy = argv[++i];
   }
-  if (!out.userId || !out.handle) {
-    throw new Error("Usage: npm run login:x -- --userId <uuid> --handle <handle> [--proxy <url>]");
+  out.endpoint ??= process.env.TALONR_CONNECT_ENDPOINT;
+  out.token ??= process.env.TALONR_CONNECT_TOKEN;
+  if (!out.endpoint || !out.token || !out.handle) {
+    throw new Error(
+      "Usage: login.ts --endpoint <url> --token <connect-token> --handle <handle> [--proxy <url>]\n" +
+        'Get --endpoint/--token from the "Finish connecting" screen in the Talonr web app — they expire after 15 minutes.'
+    );
   }
   return out as Args;
 }
@@ -55,23 +72,26 @@ async function main() {
   await page.waitForURL(/x\.com\/home/, { timeout: 5 * 60 * 1000 });
 
   const storageState = await context.storageState();
-  const encryptedSession = encryptSession(storageState);
-  const encryptedProxy = proxy ? encryptProxy(proxy) : null;
+  await browser.close();
 
-  const { rows } = await studioList<XAccount>("x_accounts", {
-    filter: { userId: args.userId, handle: args.handle },
-    limit: 1,
+  const res = await fetch(args.endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${args.token}`,
+    },
+    body: JSON.stringify({ storageState, proxy }),
   });
-  const fields = { encryptedSession, encryptedProxy, status: "active" as const };
-  if (rows[0]) {
-    await studioUpdate<XAccount>("x_accounts", rows[0].id, { ...fields, lastUsedAt: new Date() });
-  } else {
-    await studioInsert<XAccount>("x_accounts", { userId: args.userId, handle: args.handle, ...fields });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(
+      `Failed to save session (${res.status}): ${body || res.statusText}\n` +
+        "If the token expired, go back to the Talonr web app and reopen \"Finish connecting\" for a fresh one."
+    );
   }
 
-  console.log(`Saved session for @${args.handle}.`);
-
-  await browser.close();
+  console.log(`Saved session for @${args.handle}. The account is now active in the Talonr dashboard.`);
 }
 
 main().catch((err) => {

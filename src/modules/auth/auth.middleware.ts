@@ -12,7 +12,7 @@ export interface AuthedRequest extends Request {
   user?: AuthedUser;
 }
 
-function extractBearer(header: string | undefined): string | undefined {
+export function extractBearer(header: string | undefined): string | undefined {
   if (!header) return undefined;
   const [scheme, token] = header.split(" ");
   return scheme === "Bearer" ? token : undefined;
