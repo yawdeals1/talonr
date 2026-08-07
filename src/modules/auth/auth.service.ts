@@ -1,6 +1,5 @@
-import { eq } from "drizzle-orm";
-import { db } from "../../db/client.js";
-import { users } from "../../db/schema.js";
+import { studioGet, studioInsert, studioList } from "../../db/studio-client.js";
+import type { User } from "../../db/schema.js";
 import { logActivity } from "../activity/activity.service.js";
 import * as deploroAuth from "./deploro-auth.client.js";
 
@@ -8,19 +7,19 @@ export interface PublicUser {
   id: string;
   email: string;
   role: "user" | "admin";
-  createdAt: Date;
+  createdAt: string;
 }
 
-function toPublicUser(user: typeof users.$inferSelect): PublicUser {
+function toPublicUser(user: User): PublicUser {
   return { id: user.id, email: user.email, role: user.role, createdAt: user.createdAt };
 }
 
 /** Finds the local user row for a Deploro account, auto-provisioning one on first sign-in. */
-async function getOrCreateLocalUser(deploroAccountId: string, email: string): Promise<typeof users.$inferSelect> {
-  const existing = await db.query.users.findFirst({ where: eq(users.deploroAccountId, deploroAccountId) });
-  if (existing) return existing;
+async function getOrCreateLocalUser(deploroAccountId: string, email: string): Promise<User> {
+  const { rows } = await studioList<User>("users", { filter: { deploroAccountId } });
+  if (rows[0]) return rows[0];
 
-  const [created] = await db.insert(users).values({ email, deploroAccountId, role: "user" }).returning();
+  const created = await studioInsert<User>("users", { email, deploroAccountId, role: "user" });
   await logActivity(created.id, "user.provisioned", { email });
   return created;
 }
@@ -47,6 +46,6 @@ export async function validateAndSyncUser(token: string): Promise<PublicUser> {
 }
 
 export async function getUserById(id: string): Promise<PublicUser | undefined> {
-  const user = await db.query.users.findFirst({ where: eq(users.id, id) });
+  const user = await studioGet<User>("users", id);
   return user ? toPublicUser(user) : undefined;
 }

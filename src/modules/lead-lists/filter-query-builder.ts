@@ -1,39 +1,34 @@
-import { and, eq, gte, ilike, isNotNull, lte, or, type SQL } from "drizzle-orm";
-import { leads } from "../../db/schema.js";
-import type { FilterDefinition } from "../../db/schema.js";
+import type { FilterDefinition, Lead } from "../../db/schema.js";
 
 /**
- * Translates a stored FilterDefinition into a drizzle `where` clause, evaluated against the
- * already-scraped `leads` table at read time (leads are written unfiltered at scrape time).
+ * Translates a stored FilterDefinition into an in-process predicate, evaluated against the
+ * already-scraped `leads` table at read time (leads are written unfiltered at scrape time). The
+ * Studio API has no ILIKE/range filter support, so this runs in the Node process instead of
+ * compiling to SQL — acceptable for a personal-scale project's data volumes, not for a large one.
  * Rows with a null `followers` value are excluded from min/max-follower filters rather than
- * erroring, since list-view scraping frequently can't populate follower counts.
+ * matching, since list-view scraping frequently can't populate follower counts.
  */
-export function buildFilterCondition(filter: FilterDefinition): SQL | undefined {
-  const conditions: SQL[] = [];
+export function buildFilterPredicate(filter: FilterDefinition): (lead: Lead) => boolean {
+  return (lead) => {
+    if (filter.bioKeywords && filter.bioKeywords.length > 0) {
+      const bio = lead.bio?.toLowerCase() ?? "";
+      if (!filter.bioKeywords.some((keyword) => bio.includes(keyword.toLowerCase()))) return false;
+    }
 
-  if (filter.bioKeywords && filter.bioKeywords.length > 0) {
-    const bioConditions = filter.bioKeywords.map((keyword) => ilike(leads.bio, `%${keyword}%`));
-    const combined = or(...bioConditions);
-    if (combined) conditions.push(combined);
-  }
+    if (filter.minFollowers !== undefined) {
+      if (lead.followers === null || lead.followers < filter.minFollowers) return false;
+    }
 
-  if (filter.minFollowers !== undefined) {
-    conditions.push(isNotNull(leads.followers));
-    conditions.push(gte(leads.followers, filter.minFollowers));
-  }
+    if (filter.maxFollowers !== undefined) {
+      if (lead.followers === null || lead.followers > filter.maxFollowers) return false;
+    }
 
-  if (filter.maxFollowers !== undefined) {
-    conditions.push(isNotNull(leads.followers));
-    conditions.push(lte(leads.followers, filter.maxFollowers));
-  }
+    if (filter.location) {
+      if (!lead.location?.toLowerCase().includes(filter.location.toLowerCase())) return false;
+    }
 
-  if (filter.location) {
-    conditions.push(ilike(leads.location, `%${filter.location}%`));
-  }
+    if (filter.verifiedOnly && !lead.verified) return false;
 
-  if (filter.verifiedOnly) {
-    conditions.push(eq(leads.verified, true));
-  }
-
-  return and(...conditions);
+    return true;
+  };
 }

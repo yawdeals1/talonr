@@ -1,6 +1,5 @@
-import { and, eq } from "drizzle-orm";
-import { db } from "../../db/client.js";
-import { xAccounts } from "../../db/schema.js";
+import { studioDelete, studioGet, studioInsert, studioList, studioUpdate } from "../../db/studio-client.js";
+import type { XAccount } from "../../db/schema.js";
 import { NotFoundError } from "../../lib/errors.js";
 
 export interface PublicXAccount {
@@ -11,11 +10,11 @@ export interface PublicXAccount {
   hasProxy: boolean;
   dailyScrapeLimit: number;
   maxConcurrency: number;
-  lastUsedAt: Date | null;
-  createdAt: Date;
+  lastUsedAt: string | null;
+  createdAt: string;
 }
 
-function toPublic(account: typeof xAccounts.$inferSelect): PublicXAccount {
+function toPublic(account: XAccount): PublicXAccount {
   return {
     id: account.id,
     handle: account.handle,
@@ -30,15 +29,13 @@ function toPublic(account: typeof xAccounts.$inferSelect): PublicXAccount {
 }
 
 export async function listAccounts(userId: string): Promise<PublicXAccount[]> {
-  const rows = await db.query.xAccounts.findMany({ where: eq(xAccounts.userId, userId) });
+  const { rows } = await studioList<XAccount>("x_accounts", { filter: { userId }, limit: 1000 });
   return rows.map(toPublic);
 }
 
-async function findOwnedOrThrow(userId: string, accountId: string) {
-  const account = await db.query.xAccounts.findFirst({
-    where: and(eq(xAccounts.id, accountId), eq(xAccounts.userId, userId)),
-  });
-  if (!account) throw new NotFoundError("X account not found");
+async function findOwnedOrThrow(userId: string, accountId: string): Promise<XAccount> {
+  const account = await studioGet<XAccount>("x_accounts", accountId);
+  if (!account || account.userId !== userId) throw new NotFoundError("X account not found");
   return account;
 }
 
@@ -50,15 +47,12 @@ export async function createAccount(
   userId: string,
   input: { handle: string; dailyScrapeLimit?: number; maxConcurrency?: number }
 ): Promise<PublicXAccount> {
-  const [account] = await db
-    .insert(xAccounts)
-    .values({
-      userId,
-      handle: input.handle,
-      dailyScrapeLimit: input.dailyScrapeLimit,
-      maxConcurrency: input.maxConcurrency,
-    })
-    .returning();
+  const account = await studioInsert<XAccount>("x_accounts", {
+    userId,
+    handle: input.handle,
+    ...(input.dailyScrapeLimit !== undefined ? { dailyScrapeLimit: input.dailyScrapeLimit } : {}),
+    ...(input.maxConcurrency !== undefined ? { maxConcurrency: input.maxConcurrency } : {}),
+  });
   return toPublic(account);
 }
 
@@ -72,15 +66,11 @@ export async function updateAccount(
   }>
 ): Promise<PublicXAccount> {
   await findOwnedOrThrow(userId, accountId);
-  const [account] = await db
-    .update(xAccounts)
-    .set(input)
-    .where(and(eq(xAccounts.id, accountId), eq(xAccounts.userId, userId)))
-    .returning();
+  const account = await studioUpdate<XAccount>("x_accounts", accountId, input);
   return toPublic(account);
 }
 
 export async function deleteAccount(userId: string, accountId: string): Promise<void> {
   await findOwnedOrThrow(userId, accountId);
-  await db.delete(xAccounts).where(and(eq(xAccounts.id, accountId), eq(xAccounts.userId, userId)));
+  await studioDelete("x_accounts", accountId);
 }

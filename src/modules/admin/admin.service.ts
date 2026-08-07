@@ -1,29 +1,27 @@
-import { and, desc, eq } from "drizzle-orm";
-import { db } from "../../db/client.js";
-import { activityLog, scrapeJobs, users, xAccounts } from "../../db/schema.js";
+import { studioListSorted } from "../../db/studio-client.js";
+import type { ActivityLog, ScrapeJob, User, XAccount } from "../../db/schema.js";
+
+const byCreatedAtDesc = (a: { createdAt: string }, b: { createdAt: string }) =>
+  b.createdAt.localeCompare(a.createdAt);
 
 export async function listAllUsers() {
-  return db.query.users.findMany({
-    columns: { id: true, email: true, role: true, createdAt: true },
-    orderBy: desc(users.createdAt),
-  });
+  const users = await studioListSorted<User>("users", { cap: 5000 }, byCreatedAtDesc);
+  return users.map(({ id, email, role, createdAt }) => ({ id, email, role, createdAt }));
 }
 
 /** Status/limits only — never returns encrypted_session or encrypted_proxy. */
 export async function listUserAccounts(userId: string) {
-  return db.query.xAccounts.findMany({
-    where: eq(xAccounts.userId, userId),
-    columns: {
-      id: true,
-      userId: true,
-      handle: true,
-      status: true,
-      dailyScrapeLimit: true,
-      maxConcurrency: true,
-      lastUsedAt: true,
-      createdAt: true,
-    },
-  });
+  const accounts = await studioListSorted<XAccount>("x_accounts", { filter: { userId } }, byCreatedAtDesc);
+  return accounts.map(({ id, userId: uid, handle, status, dailyScrapeLimit, maxConcurrency, lastUsedAt, createdAt }) => ({
+    id,
+    userId: uid,
+    handle,
+    status,
+    dailyScrapeLimit,
+    maxConcurrency,
+    lastUsedAt,
+    createdAt,
+  }));
 }
 
 export interface AdminScrapeJobFilters {
@@ -32,15 +30,12 @@ export interface AdminScrapeJobFilters {
 }
 
 export async function listAllScrapeJobs(filters: AdminScrapeJobFilters) {
-  const conditions = [];
-  if (filters.userId) conditions.push(eq(scrapeJobs.userId, filters.userId));
-  if (filters.status) conditions.push(eq(scrapeJobs.status, filters.status));
-
-  return db.query.scrapeJobs.findMany({
-    where: conditions.length ? and(...conditions) : undefined,
-    orderBy: desc(scrapeJobs.createdAt),
-    limit: 200,
-  });
+  const jobs = await studioListSorted<ScrapeJob>(
+    "scrape_jobs",
+    { filter: { ...(filters.userId ? { userId: filters.userId } : {}), ...(filters.status ? { status: filters.status } : {}) }, cap: 200 },
+    byCreatedAtDesc
+  );
+  return jobs.slice(0, 200);
 }
 
 export interface AdminActivityFilters {
@@ -54,16 +49,12 @@ export async function listActivity(filters: AdminActivityFilters) {
   const page = filters.page ?? 1;
   const pageSize = Math.min(filters.pageSize ?? 50, 200);
 
-  const conditions = [];
-  if (filters.userId) conditions.push(eq(activityLog.userId, filters.userId));
-  if (filters.action) conditions.push(eq(activityLog.action, filters.action));
+  const all = await studioListSorted<ActivityLog>(
+    "activity_log",
+    { filter: { ...(filters.userId ? { userId: filters.userId } : {}), ...(filters.action ? { action: filters.action } : {}) }, cap: 5000 },
+    byCreatedAtDesc
+  );
 
-  const rows = await db.query.activityLog.findMany({
-    where: conditions.length ? and(...conditions) : undefined,
-    orderBy: desc(activityLog.createdAt),
-    limit: pageSize,
-    offset: (page - 1) * pageSize,
-  });
-
-  return { activity: rows, page, pageSize };
+  const start = (page - 1) * pageSize;
+  return { activity: all.slice(start, start + pageSize), page, pageSize };
 }

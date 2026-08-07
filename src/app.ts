@@ -3,7 +3,7 @@ import cors from "cors";
 import express from "express";
 import helmet from "helmet";
 import { env } from "./config/env.js";
-import { pool } from "./db/client.js";
+import { studioList } from "./db/studio-client.js";
 import { redisConnection } from "./queue/connection.js";
 import { errorHandler } from "./lib/errors.js";
 import { accountsRouter } from "./modules/accounts/accounts.routes.js";
@@ -22,7 +22,7 @@ app.use(cookieParser());
 
 app.get("/api/health", async (_req, res) => {
   try {
-    await pool.query("SELECT 1");
+    await studioList("users", { limit: 1 });
     await redisConnection.ping();
     res.json({ status: "ok" });
   } catch (err) {

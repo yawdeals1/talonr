@@ -6,8 +6,8 @@
  *   npm run login:x -- --userId <uuid> --handle <handle> [--proxy http://user:pass@host:port]
  */
 import { chromium } from "playwright";
-import { db, pool } from "../src/db/client.js";
-import { xAccounts } from "../src/db/schema.js";
+import { studioInsert, studioList, studioUpdate } from "../src/db/studio-client.js";
+import type { XAccount } from "../src/db/schema.js";
 import { encryptProxy, encryptSession, type ProxyConfig } from "../src/scraper/session-store.js";
 
 interface Args {
@@ -58,24 +58,20 @@ async function main() {
   const encryptedSession = encryptSession(storageState);
   const encryptedProxy = proxy ? encryptProxy(proxy) : null;
 
-  await db
-    .insert(xAccounts)
-    .values({
-      userId: args.userId,
-      handle: args.handle,
-      encryptedSession,
-      encryptedProxy,
-      status: "active",
-    })
-    .onConflictDoUpdate({
-      target: [xAccounts.userId, xAccounts.handle],
-      set: { encryptedSession, encryptedProxy, status: "active", lastUsedAt: new Date() },
-    });
+  const { rows } = await studioList<XAccount>("x_accounts", {
+    filter: { userId: args.userId, handle: args.handle },
+    limit: 1,
+  });
+  const fields = { encryptedSession, encryptedProxy, status: "active" as const };
+  if (rows[0]) {
+    await studioUpdate<XAccount>("x_accounts", rows[0].id, { ...fields, lastUsedAt: new Date() });
+  } else {
+    await studioInsert<XAccount>("x_accounts", { userId: args.userId, handle: args.handle, ...fields });
+  }
 
   console.log(`Saved session for @${args.handle}.`);
 
   await browser.close();
-  await pool.end();
 }
 
 main().catch((err) => {

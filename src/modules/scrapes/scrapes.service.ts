@@ -1,7 +1,6 @@
-import { and, desc, eq } from "drizzle-orm";
 import { env } from "../../config/env.js";
-import { db } from "../../db/client.js";
-import { scrapeJobs, xAccounts } from "../../db/schema.js";
+import { studioGet, studioInsert, studioListSorted, studioUpdate } from "../../db/studio-client.js";
+import type { ScrapeJob, XAccount } from "../../db/schema.js";
 import { NotFoundError, ValidationError } from "../../lib/errors.js";
 import { scrapeQueue } from "../../queue/queues.js";
 
@@ -12,25 +11,23 @@ export interface CreateScrapeInput {
   capLeads?: number;
 }
 
+const byCreatedAtDesc = (a: { createdAt: string }, b: { createdAt: string }) =>
+  b.createdAt.localeCompare(a.createdAt);
+
 export async function createScrapeJob(userId: string, input: CreateScrapeInput) {
-  const account = await db.query.xAccounts.findFirst({
-    where: and(eq(xAccounts.id, input.xAccountId), eq(xAccounts.userId, userId)),
-  });
-  if (!account) throw new NotFoundError("X account not found");
+  const account = await studioGet<XAccount>("x_accounts", input.xAccountId);
+  if (!account || account.userId !== userId) throw new NotFoundError("X account not found");
   if (account.status !== "active") {
     throw new ValidationError(`X account is ${account.status}, cannot trigger a scrape`);
   }
 
-  const [job] = await db
-    .insert(scrapeJobs)
-    .values({
-      userId,
-      xAccountId: input.xAccountId,
-      sourceType: input.sourceType,
-      sourceRef: input.sourceRef,
-      status: "queued",
-    })
-    .returning();
+  const job = await studioInsert<ScrapeJob>("scrape_jobs", {
+    userId,
+    xAccountId: input.xAccountId,
+    sourceType: input.sourceType,
+    sourceRef: input.sourceRef,
+    status: "queued",
+  });
 
   await scrapeQueue.add(
     "scrape",
@@ -54,21 +51,22 @@ export interface ListScrapesOptions {
 }
 
 export async function listScrapeJobs(userId: string, options: ListScrapesOptions) {
-  const conditions = [eq(scrapeJobs.userId, userId)];
-  if (options.status) conditions.push(eq(scrapeJobs.status, options.status));
-  if (options.xAccountId) conditions.push(eq(scrapeJobs.xAccountId, options.xAccountId));
-
-  return db.query.scrapeJobs.findMany({
-    where: and(...conditions),
-    orderBy: desc(scrapeJobs.createdAt),
-  });
+  return studioListSorted<ScrapeJob>(
+    "scrape_jobs",
+    {
+      filter: {
+        userId,
+        ...(options.status ? { status: options.status } : {}),
+        ...(options.xAccountId ? { xAccountId: options.xAccountId } : {}),
+      },
+    },
+    byCreatedAtDesc
+  );
 }
 
 export async function getScrapeJob(userId: string, id: string) {
-  const job = await db.query.scrapeJobs.findFirst({
-    where: and(eq(scrapeJobs.id, id), eq(scrapeJobs.userId, userId)),
-  });
-  if (!job) throw new NotFoundError("Scrape job not found");
+  const job = await studioGet<ScrapeJob>("scrape_jobs", id);
+  if (!job || job.userId !== userId) throw new NotFoundError("Scrape job not found");
   return job;
 }
 
@@ -84,12 +82,11 @@ export async function cancelScrapeJob(userId: string, id: string) {
   }
 
   if (job.status === "queued") {
-    const [updated] = await db
-      .update(scrapeJobs)
-      .set({ status: "failed", errorMessage: "Cancelled by user", finishedAt: new Date() })
-      .where(and(eq(scrapeJobs.id, id), eq(scrapeJobs.userId, userId)))
-      .returning();
-    return updated;
+    return studioUpdate<ScrapeJob>("scrape_jobs", id, {
+      status: "failed",
+      errorMessage: "Cancelled by user",
+      finishedAt: new Date(),
+    });
   }
 
   // Already running/terminal: best-effort only, can't hard-kill an in-flight Playwright run.

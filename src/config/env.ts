@@ -2,18 +2,20 @@ import "dotenv/config";
 import { z } from "zod";
 
 const envSchema = z.object({
-  DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
-  // Internal Docker-network connection strings, when the VPS's compute stack and its
-  // raw Postgres/Redis containers share a network — preferred over the public-IP
-  // variants above when present, since they avoid a same-host NAT hairpin round trip.
-  DATABASE_URL_INTERNAL: z.string().min(1).optional(),
+  // Internal Docker-network connection string, when the VPS's compute stack and its raw
+  // Redis container share a network — preferred over the public-IP variant above when
+  // present, since it avoids a same-host NAT hairpin round trip.
   REDIS_URL_INTERNAL: z.string().min(1).optional(),
   SESSION_ENCRYPTION_KEY: z.string().min(1),
   // Deploro's platform Worker, which hosts the Auth-as-a-Service routes (/auth/:slug/*) used
   // in place of locally-signed JWTs. See src/modules/auth/deploro-auth.client.ts.
   DEPLORO_AUTH_BASE_URL: z.string().min(1),
   DEPLORO_PROJECT_SLUG: z.string().min(1).default("talonr"),
+  // Deploro's Studio DB REST API — {DEPLORO_AUTH_BASE_URL}/api/projects/{id}/studio — used in
+  // place of a direct Postgres connection. See src/db/studio-client.ts.
+  DEPLORO_STUDIO_API_URL: z.string().min(1),
+  DEPLORO_STUDIO_API_TOKEN: z.string().min(1),
   PORT: z.coerce.number().int().positive().default(3000),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   COOKIE_SECURE: z.coerce.boolean().default(false),

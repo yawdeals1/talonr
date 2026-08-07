@@ -1,8 +1,7 @@
 import { DelayedError, Worker } from "bullmq";
-import { eq } from "drizzle-orm";
 import { env } from "../../config/env.js";
-import { db } from "../../db/client.js";
-import { scrapeJobs, xAccounts } from "../../db/schema.js";
+import { studioGet, studioUpdate } from "../../db/studio-client.js";
+import type { ScrapeJob, XAccount } from "../../db/schema.js";
 import { logger } from "../../lib/logger.js";
 import { logActivity } from "../../modules/activity/activity.service.js";
 import { upsertLeads } from "../../modules/leads/leads.service.js";
@@ -30,22 +29,19 @@ async function markJobStatus(
   errorMessage?: string,
   extra?: Partial<{ startedAt: Date; finishedAt: Date; leadsFound: number }>
 ) {
-  await db
-    .update(scrapeJobs)
-    .set({ status, errorMessage: errorMessage ?? null, ...extra })
-    .where(eq(scrapeJobs.id, scrapeJobId));
+  await studioUpdate<ScrapeJob>("scrape_jobs", scrapeJobId, { status, errorMessage: errorMessage ?? null, ...extra });
 }
 
 async function setAccountStatus(xAccountId: string, status: "active" | "checkpointed" | "banned") {
-  await db.update(xAccounts).set({ status }).where(eq(xAccounts.id, xAccountId));
+  await studioUpdate<XAccount>("x_accounts", xAccountId, { status });
 }
 
 async function touchAccountLastUsed(xAccountId: string) {
-  await db.update(xAccounts).set({ lastUsedAt: new Date() }).where(eq(xAccounts.id, xAccountId));
+  await studioUpdate<XAccount>("x_accounts", xAccountId, { lastUsedAt: new Date() });
 }
 
 async function runScrape(data: ScrapeJobData): Promise<{ leadsFound: number }> {
-  const account = await db.query.xAccounts.findFirst({ where: eq(xAccounts.id, data.xAccountId) });
+  const account = await studioGet<XAccount>("x_accounts", data.xAccountId);
   if (!account) throw new Error(`X account ${data.xAccountId} not found`);
   if (!account.encryptedSession) {
     throw new Error(`X account ${data.xAccountId} has no saved session — run the login script first`);
@@ -80,7 +76,7 @@ export function startScrapeWorker(): Worker<ScrapeJobData> {
     async (job, token) => {
       const { scrapeJobId, xAccountId } = job.data;
 
-      const account = await db.query.xAccounts.findFirst({ where: eq(xAccounts.id, xAccountId) });
+      const account = await studioGet<XAccount>("x_accounts", xAccountId);
       if (!account) {
         await markJobStatus(scrapeJobId, "failed", "X account no longer exists");
         return;
