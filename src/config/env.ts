@@ -19,7 +19,10 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   COOKIE_SECURE: z.coerce.boolean().default(false),
-  ALLOWED_ORIGIN: z.string().default("http://localhost:5173"),
+  // Matches frontend/vite.config.ts's dev server port. Cookie-based auth (see auth.controller.ts)
+  // needs this to actually match the frontend's origin for local dev's cross-origin
+  // (different port, same "localhost" site) credentialed requests to work.
+  ALLOWED_ORIGIN: z.string().default("http://localhost:5199"),
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(5),
   DEFAULT_DAILY_SCRAPE_LIMIT: z.coerce.number().int().positive().default(150),
   DEFAULT_MAX_CONCURRENCY_PER_ACCOUNT: z.coerce.number().int().positive().default(1),

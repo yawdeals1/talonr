@@ -1,5 +1,4 @@
 import { API_BASE_URL } from "../lib/config";
-import { getToken } from "../lib/tokenStore";
 
 export class ApiError extends Error {
   status: number;
@@ -36,12 +35,15 @@ function buildUrl(path: string, query?: RequestOptions["query"]): string {
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = {};
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
-  const token = getToken();
-  if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const res = await fetch(buildUrl(path, options.query), {
     method: options.method ?? "GET",
     headers,
+    // Auth lives in the httpOnly talonr_token cookie the API sets on login — never in JS-readable
+    // storage. "include" is required for the cross-origin case (local dev: Vite's dev server on a
+    // different port than the API); same-origin in production (the Worker proxies /backend
+    // same-origin), where it's a no-op.
+    credentials: "include",
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
   });
 

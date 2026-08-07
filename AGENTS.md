@@ -17,9 +17,10 @@ A React + Vite frontend lives in `frontend/` (built from the Google Stitch desig
 per-screen `code.html` + `screen.png`, dark variant plus a `*_light` counterpart for each, and a
 consolidated `talonr_operator_system/DESIGN.md` design system — saved at
 `C:\Users\Caleb\OneDrive\Desktop\Talonr\stitch_talonr_operator_console`). It talks to this backend
-over the REST API only, using a Bearer token stored in `localStorage`
-(`frontend/src/lib/tokenStore.ts`) rather than relying on the `talonr_token` cookie. `npm run build`
-builds the frontend and copies its `dist/` into the root `dist/`, served by the same Worker deploy.
+over the REST API only, authenticating via the httpOnly `talonr_token` cookie the API sets on
+login (`credentials: "include"` on every request, `frontend/src/api/client.ts`) — no token is ever
+held in JS-readable storage. `npm run build` builds the frontend and copies its `dist/` into the
+root `dist/`, served by the same Worker deploy.
 
 ## Tech stack
 
@@ -150,10 +151,11 @@ directly from Talonr's deployed frontend).
   Deploro requires the user to click an emailed confirmation link before they can log in — there is
   no instant-registration path, by Deploro's design.
 - `POST /api/auth/login` → calls Deploro's `email-password/login`, gets back a Deploro session
-  token, and returns `{ user, token }`. That token is set as the httpOnly `talonr_token` cookie
-  (kept for parity/non-browser clients) and also accepted via `Authorization: Bearer <token>` — the
-  deployed frontend uses the Bearer/`localStorage` path exclusively
-  (`frontend/src/lib/tokenStore.ts`).
+  token, sets it as the httpOnly `talonr_token` cookie, and also returns it in the response body as
+  `{ user, token }` for non-browser API consumers (also accepted via `Authorization: Bearer
+  <token>` — `requireAuth` checks the cookie first, falling back to the header). The deployed
+  frontend uses the cookie exclusively (`credentials: "include"` on every request,
+  `frontend/src/api/client.ts`) and never persists the token itself.
 - `requireAuth` (`auth.middleware.ts`) validates that token against Deploro's `GET
   /auth/{slug}/session` on every request (`auth.service.ts#validateAndSyncUser`), auto-provisioning
   a local `users` row on first sight of a given `deploro_account_id` — that local row is the FK

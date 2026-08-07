@@ -1,7 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import * as authApi from "../api/auth";
 import type { User } from "../api/types";
-import { clearToken, getToken, setToken } from "../lib/tokenStore";
 
 interface AuthContextValue {
   user: User | null;
@@ -18,23 +17,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    if (!getToken()) {
-      setIsLoading(false);
-      return;
-    }
+    // Auth lives in an httpOnly cookie — JS can't read it to short-circuit this, so always probe
+    // /auth/me on load and let a missing/expired cookie fail it naturally.
     authApi
       .me()
       .then(({ user }) => setUser(user))
-      .catch(() => {
-        clearToken();
-        setUser(null);
-      })
+      .catch(() => setUser(null))
       .finally(() => setIsLoading(false));
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    const { user, token } = await authApi.login(email, password);
-    setToken(token);
+    const { user } = await authApi.login(email, password);
     setUser(user);
   }, []);
 
@@ -49,7 +42,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await authApi.logout();
     } finally {
-      clearToken();
       setUser(null);
     }
   }, []);
