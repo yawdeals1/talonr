@@ -1,17 +1,10 @@
-import { useMemo, useState, type FormEvent } from "react";
-import { Navigate, useNavigate } from "react-router";
+import { useState, type FormEvent } from "react";
+import { Link, Navigate, useNavigate } from "react-router";
 import { ApiError } from "../api/client";
+import { PasswordCriteriaList, usePasswordCriteria } from "../components/PasswordCriteria";
 import { useAuth } from "../context/AuthContext";
 
 type Tab = "login" | "register";
-
-const PASSWORD_CRITERIA: { label: string; test: (pw: string) => boolean }[] = [
-  { label: "At least 8 characters", test: (pw) => pw.length >= 8 },
-  { label: "One lowercase letter", test: (pw) => /[a-z]/.test(pw) },
-  { label: "One uppercase letter", test: (pw) => /[A-Z]/.test(pw) },
-  { label: "One number", test: (pw) => /[0-9]/.test(pw) },
-  { label: "One special character", test: (pw) => /[^A-Za-z0-9]/.test(pw) },
-];
 
 export function LoginRegister() {
   const { user, isLoading, login, register } = useAuth();
@@ -24,11 +17,7 @@ export function LoginRegister() {
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const passwordChecks = useMemo(
-    () => PASSWORD_CRITERIA.map((c) => ({ ...c, met: c.test(password) })),
-    [password]
-  );
-  const passwordMeetsCriteria = passwordChecks.every((c) => c.met);
+  const { checks: passwordChecks, meetsAll: passwordMeetsCriteria } = usePasswordCriteria(password);
 
   if (!isLoading && user) {
     return <Navigate to="/" replace />;
@@ -122,17 +111,11 @@ export function LoginRegister() {
               onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
             />
-            {tab === "register" ? (
-              <ul className="mt-1.5 space-y-0.5">
-                {passwordChecks.map((c) => (
-                  <li
-                    key={c.label}
-                    className={`text-xs ${c.met ? "text-status-success" : "text-zinc-500"}`}
-                  >
-                    {c.met ? "✓" : "·"} {c.label}
-                  </li>
-                ))}
-              </ul>
+            {tab === "register" ? <PasswordCriteriaList checks={passwordChecks} /> : null}
+            {tab === "login" ? (
+              <Link to="/forgot-password" className="mt-1.5 inline-block text-xs text-accent-text hover:underline">
+                Forgot password?
+              </Link>
             ) : null}
           </div>
 

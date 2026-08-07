@@ -8,6 +8,8 @@ import { AdminAccountsJobs } from "./pages/admin/AdminAccountsJobs";
 import { AdminActivity } from "./pages/admin/AdminActivity";
 import { AdminUsers } from "./pages/admin/AdminUsers";
 import { Dashboard } from "./pages/Dashboard";
+import { ForgotPassword } from "./pages/ForgotPassword";
+import { ResetPassword } from "./pages/ResetPassword";
 import { LeadListDetail } from "./pages/LeadListDetail";
 import { LeadListForm } from "./pages/LeadListForm";
 import { LeadLists } from "./pages/LeadLists";
@@ -30,6 +32,8 @@ function App() {
           <AuthProvider>
             <Routes>
               <Route path="/login" element={<LoginRegister />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
 
               <Route element={<RequireAuth />}>
                 <Route element={<AppShell />}>

@@ -1,5 +1,5 @@
 import { env } from "../../config/env.js";
-import { AppError, ForbiddenError, UnauthorizedError } from "../../lib/errors.js";
+import { AppError, ForbiddenError, UnauthorizedError, ValidationError } from "../../lib/errors.js";
 
 const BASE = env.DEPLORO_AUTH_BASE_URL;
 const SLUG = env.DEPLORO_PROJECT_SLUG;
@@ -84,6 +84,40 @@ export async function validateSession(token: string): Promise<DeploroUser> {
 
   const data = await parseJson(res);
   return data.user as DeploroUser;
+}
+
+/**
+ * Kicks off a password reset. Deploro always responds { ok: true } regardless of whether the
+ * email has a confirmed email_password identity (anti-enumeration, same as signup) — emails a
+ * reset link only when one actually exists.
+ */
+export async function requestPasswordReset(email: string): Promise<void> {
+  const res = await fetch(`${BASE}/auth/${SLUG}/email-password/request-reset`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) {
+    const data = await parseJson(res);
+    throw new AppError(errorMessage(data, "Could not reach Deploro Auth"), 502);
+  }
+}
+
+/**
+ * Consumes a reset token and sets a new password. Deploro revokes every existing session for the
+ * identity as part of this and does NOT issue a new one — the user logs in fresh afterward with
+ * their new password, same as the platform's own reset-password flow.
+ */
+export async function resetPassword(token: string, password: string): Promise<void> {
+  const res = await fetch(`${BASE}/auth/${SLUG}/email-password/reset`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, password }),
+  });
+  if (!res.ok) {
+    const data = await parseJson(res);
+    throw new ValidationError(errorMessage(data, "Password reset failed"));
+  }
 }
 
 /** Best-effort — invalidates the session server-side; local cookie clears regardless of outcome. */

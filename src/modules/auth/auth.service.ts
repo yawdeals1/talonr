@@ -29,6 +29,17 @@ export async function registerUser(email: string, password: string): Promise<{ m
   return { message: "Check your email to confirm your account, then log in." };
 }
 
+export async function requestPasswordReset(email: string): Promise<{ message: string }> {
+  await deploroAuth.requestPasswordReset(email);
+  return { message: "If that account exists, check your email for a reset link." };
+}
+
+/** Deploro revokes all sessions on reset and doesn't issue a new one — the caller logs in fresh. */
+export async function resetPassword(token: string, password: string): Promise<{ message: string }> {
+  await deploroAuth.resetPassword(token, password);
+  return { message: "Password reset. Log in with your new password." };
+}
+
 export async function loginUser(email: string, password: string): Promise<{ user: PublicUser; token: string }> {
   const { token, user: deploroUser } = await deploroAuth.loginEmailPassword(email, password);
   const localUser = await getOrCreateLocalUser(deploroUser.id, deploroUser.email ?? email);

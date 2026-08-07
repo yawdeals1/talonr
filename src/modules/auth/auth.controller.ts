@@ -4,7 +4,7 @@ import { env } from "../../config/env.js";
 import { NotFoundError, ValidationError } from "../../lib/errors.js";
 import * as deploroAuth from "./deploro-auth.client.js";
 import type { AuthedRequest } from "./auth.middleware.js";
-import { getUserById, loginUser, registerUser } from "./auth.service.js";
+import { getUserById, loginUser, registerUser, requestPasswordReset as requestPasswordResetService, resetPassword as resetPasswordService } from "./auth.service.js";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -12,19 +12,30 @@ const loginSchema = z.object({
 });
 
 // Stricter than Deploro Auth's own 8-char-only minimum — enforced here so weak passwords never
-// reach signup in the first place. Only applies to registration: an existing account's password
-// was valid under whatever rule was in effect when it was set, and must keep logging in under
-// loginSchema regardless of these criteria changing later.
+// reach Deploro in the first place. Only applies where a *new* password is being set (register,
+// reset): an existing account's password was valid under whatever rule was in effect when it was
+// set, and must keep logging in under loginSchema regardless of these criteria changing later.
+const passwordCriteriaSchema = z
+  .string()
+  .min(8, "Password must be at least 8 characters")
+  .max(72, "Password must be at most 72 characters")
+  .regex(/[a-z]/, "Password must include a lowercase letter")
+  .regex(/[A-Z]/, "Password must include an uppercase letter")
+  .regex(/[0-9]/, "Password must include a number")
+  .regex(/[^A-Za-z0-9]/, "Password must include a special character");
+
 const registerSchema = z.object({
   email: z.string().email(),
-  password: z
-    .string()
-    .min(8, "Password must be at least 8 characters")
-    .max(72, "Password must be at most 72 characters")
-    .regex(/[a-z]/, "Password must include a lowercase letter")
-    .regex(/[A-Z]/, "Password must include an uppercase letter")
-    .regex(/[0-9]/, "Password must include a number")
-    .regex(/[^A-Za-z0-9]/, "Password must include a special character"),
+  password: passwordCriteriaSchema,
+});
+
+const requestResetSchema = z.object({
+  email: z.string().email(),
+});
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(1, "Reset token is required"),
+  password: passwordCriteriaSchema,
 });
 
 const COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -60,6 +71,22 @@ export async function login(req: AuthedRequest, res: Response) {
   const { user, token } = await loginUser(parsed.data.email, parsed.data.password);
   setAuthCookie(res, token);
   res.json({ user, token });
+}
+
+export async function requestPasswordReset(req: AuthedRequest, res: Response) {
+  const parsed = requestResetSchema.safeParse(req.body);
+  if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Invalid request");
+
+  const { message } = await requestPasswordResetService(parsed.data.email);
+  res.status(202).json({ message });
+}
+
+export async function resetPassword(req: AuthedRequest, res: Response) {
+  const parsed = resetPasswordSchema.safeParse(req.body);
+  if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Invalid request");
+
+  const { message } = await resetPasswordService(parsed.data.token, parsed.data.password);
+  res.status(200).json({ message });
 }
 
 export async function logout(req: AuthedRequest, res: Response) {
