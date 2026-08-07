@@ -1,9 +1,17 @@
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router";
 import { ApiError } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 
 type Tab = "login" | "register";
+
+const PASSWORD_CRITERIA: { label: string; test: (pw: string) => boolean }[] = [
+  { label: "At least 8 characters", test: (pw) => pw.length >= 8 },
+  { label: "One lowercase letter", test: (pw) => /[a-z]/.test(pw) },
+  { label: "One uppercase letter", test: (pw) => /[A-Z]/.test(pw) },
+  { label: "One number", test: (pw) => /[0-9]/.test(pw) },
+  { label: "One special character", test: (pw) => /[^A-Za-z0-9]/.test(pw) },
+];
 
 export function LoginRegister() {
   const { user, isLoading, login, register } = useAuth();
@@ -15,6 +23,12 @@ export function LoginRegister() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const passwordChecks = useMemo(
+    () => PASSWORD_CRITERIA.map((c) => ({ ...c, met: c.test(password) })),
+    [password]
+  );
+  const passwordMeetsCriteria = passwordChecks.every((c) => c.met);
 
   if (!isLoading && user) {
     return <Navigate to="/" replace />;
@@ -98,13 +112,28 @@ export function LoginRegister() {
               id="password"
               type="password"
               required
-              minLength={8}
-              autoComplete={tab === "login" ? "current-password" : "new-password"}
+              minLength={tab === "login" ? undefined : 8}
+              // Registration deliberately avoids "new-password": that's the value that tells
+              // browsers "this will become a saved credential" and triggers the save-password
+              // prompt right after submit. Login keeps "current-password" so browsers can offer
+              // to autofill (and, there, offer to save) an existing saved credential.
+              autoComplete={tab === "login" ? "current-password" : "off"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
             />
-            <p className="mt-1 text-xs text-zinc-500">At least 8 characters.</p>
+            {tab === "register" ? (
+              <ul className="mt-1.5 space-y-0.5">
+                {passwordChecks.map((c) => (
+                  <li
+                    key={c.label}
+                    className={`text-xs ${c.met ? "text-status-success" : "text-zinc-500"}`}
+                  >
+                    {c.met ? "✓" : "·"} {c.label}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </div>
 
           {notice && <p className="text-sm text-status-success">{notice}</p>}
@@ -112,7 +141,7 @@ export function LoginRegister() {
 
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || (tab === "register" && !passwordMeetsCriteria)}
             className="w-full rounded-md bg-accent py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             {submitting ? "Please wait…" : tab === "login" ? "Log in" : "Create account"}

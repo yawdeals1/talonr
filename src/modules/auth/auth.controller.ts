@@ -6,9 +6,25 @@ import * as deploroAuth from "./deploro-auth.client.js";
 import type { AuthedRequest } from "./auth.middleware.js";
 import { getUserById, loginUser, registerUser } from "./auth.service.js";
 
-const credentialsSchema = z.object({
+const loginSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(8),
+  password: z.string().min(1, "Password is required"),
+});
+
+// Stricter than Deploro Auth's own 8-char-only minimum — enforced here so weak passwords never
+// reach signup in the first place. Only applies to registration: an existing account's password
+// was valid under whatever rule was in effect when it was set, and must keep logging in under
+// loginSchema regardless of these criteria changing later.
+const registerSchema = z.object({
+  email: z.string().email(),
+  password: z
+    .string()
+    .min(8, "Password must be at least 8 characters")
+    .max(72, "Password must be at most 72 characters")
+    .regex(/[a-z]/, "Password must include a lowercase letter")
+    .regex(/[A-Z]/, "Password must include an uppercase letter")
+    .regex(/[0-9]/, "Password must include a number")
+    .regex(/[^A-Za-z0-9]/, "Password must include a special character"),
 });
 
 const COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -30,7 +46,7 @@ function extractToken(req: AuthedRequest): string | undefined {
 }
 
 export async function register(req: AuthedRequest, res: Response) {
-  const parsed = credentialsSchema.safeParse(req.body);
+  const parsed = registerSchema.safeParse(req.body);
   if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Invalid request");
 
   const { message } = await registerUser(parsed.data.email, parsed.data.password);
@@ -38,7 +54,7 @@ export async function register(req: AuthedRequest, res: Response) {
 }
 
 export async function login(req: AuthedRequest, res: Response) {
-  const parsed = credentialsSchema.safeParse(req.body);
+  const parsed = loginSchema.safeParse(req.body);
   if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Invalid request");
 
   const { user, token } = await loginUser(parsed.data.email, parsed.data.password);
