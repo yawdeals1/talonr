@@ -30,7 +30,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <>
-      <div className="flex h-14 items-center px-4">
+      <div className="flex h-14 items-center gap-2 px-4">
+        <img src="/favicon.png" alt="" className="h-4 w-4" />
         <span className="font-mono text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
           talonr
         </span>

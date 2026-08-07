@@ -77,7 +77,10 @@ export function LoginRegister() {
   return (
     <div className="flex h-full items-center justify-center bg-zinc-50 dark:bg-zinc-950">
       <div className="w-full max-w-sm rounded-lg border bg-white p-6 dark:bg-zinc-900/40">
-        <p className="mb-6 font-mono text-sm font-semibold text-zinc-900 dark:text-zinc-50">talonr</p>
+        <div className="mb-6 flex items-center gap-2">
+          <img src="/favicon.png" alt="" className="h-5 w-5" />
+          <p className="font-mono text-sm font-semibold text-zinc-900 dark:text-zinc-50">talonr</p>
+        </div>
 
         <div className="mb-6 flex rounded-md border p-0.5">
           {(["login", "register"] as const).map((t) => (
