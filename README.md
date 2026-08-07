@@ -83,13 +83,19 @@ mkdir -p ~/talonr-login && cd ~/talonr-login && \
   npx --yes tsx talonr-login.ts --endpoint <url> --token <connect-token> --handle <x-handle>
 ```
 
-`npx playwright install chrome` matters twice over: `npm install playwright` alone doesn't fetch
-a browser binary at all, and `login.ts` specifically launches the `chrome` channel (a real,
-locally installed Chrome) rather than Playwright's bundled Chromium build — "Sign in with Google"
-(common for logging into X) actively blocks that bundled build with a "This browser or app may
-not be secure" error; real Chrome doesn't trip it.
+`npx playwright install chrome` matters: `npm install playwright` alone doesn't fetch a browser
+binary at all, and `login.ts` launches the `chrome` channel (a real, locally installed Chrome)
+rather than Playwright's bundled Chromium build, which is generally the better default for an
+interactive login session.
 
-This opens a real (headed) Chromium window. Log in manually, complete any 2FA/captcha, and once you
+**Use X's own username/password login in that window — not "Continue with Google".** Google's
+OAuth deliberately blocks any CDP-automated browser session (Playwright, Selenium, Puppeteer,
+regardless of the underlying Chrome binary) as an anti-bot security control, and it will fail with
+"This browser or app may not be secure" every time. If the account was created via Google sign-in
+and has no separate password, set one first from a normal (non-automated) browser — X's own
+Settings → Your account → Change password — then use that here.
+
+This opens a real (headed) Chrome window. Log in manually, complete any 2FA/captcha, and once you
 land on `x.com/home` the script captures the session (cookies + storage) and POSTs it to `POST
 /api/accounts/session`, authenticated by the connect token rather than a login session. The server
 encrypts it with `SESSION_ENCRYPTION_KEY` and updates the `x_accounts` row the token was scoped to

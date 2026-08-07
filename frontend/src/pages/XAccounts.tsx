@@ -343,6 +343,13 @@ function FinishConnectingModal({ account, onClose }: { account: XAccount; onClos
         downloads a small script and opens a browser window for you to log in as @{account.handle}.
       </p>
 
+      <p className="mb-3 rounded border border-status-warning-bg bg-status-warning-bg px-2 py-1.5 text-xs text-status-warning">
+        In that window, log in with your X <strong>username/password</strong> — not "Continue with Google".
+        Google blocks automated browser sessions outright and that button will fail. If this account only
+        has Google sign-in, set an X password first in a normal browser (Settings → Your account → Change
+        password), then come back and use that.
+      </p>
+
       <div className="mb-2 flex gap-1 text-xs">
         <button
           type="button"

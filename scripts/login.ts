@@ -61,9 +61,12 @@ async function main() {
   const proxy = args.proxy ? parseProxyUrl(args.proxy) : null;
 
   // channel: "chrome" launches the real, locally installed Chrome rather than Playwright's
-  // bundled Chromium build — needed because "Sign in with Google" (a common way to log into X)
-  // actively blocks that bundled build with a "This browser or app may not be secure" error.
-  // Real Chrome doesn't trip that heuristic. Requires `npx playwright install chrome` once.
+  // bundled Chromium build. This does NOT get "Continue with Google" working — Google's OAuth
+  // deliberately blocks any CDP-automated session (Playwright/Selenium/Puppeteer alike),
+  // regardless of which Chrome binary is underneath, as an anti-bot security control. The real
+  // fix is telling the user to use X's own username/password login instead (see the console.log
+  // below) — channel: "chrome" is kept anyway since it's still the better default for everything
+  // else about this session. Requires `npx playwright install chrome` once.
   let browser;
   try {
     browser = await chromium.launch({ headless: false, channel: "chrome" });
@@ -80,6 +83,12 @@ async function main() {
   await page.goto("https://x.com/login");
 
   console.log(`Log in as @${args.handle} in the opened browser window.`);
+  console.log(
+    'Use "Log in" with your X username/password, NOT "Continue with Google" — Google blocks ' +
+      "automated browser sessions outright and it will fail with \"This browser or app may not be secure\", " +
+      "even in real Chrome. If this account only has Google sign-in, set an X password first: log in " +
+      "normally in a regular (non-automated) browser, then Settings -> Your account -> Change password."
+  );
   console.log("Complete any 2FA/captcha manually. Waiting up to 5 minutes for /home...");
   await page.waitForURL(/x\.com\/home/, { timeout: 5 * 60 * 1000 });
 
