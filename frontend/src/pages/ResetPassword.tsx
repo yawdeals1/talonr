@@ -11,10 +11,12 @@ export function ResetPassword() {
   const token = searchParams.get("reset_token");
 
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const { checks, meetsAll } = usePasswordCriteria(password);
+  const passwordsMatch = confirmPassword.length > 0 && password === confirmPassword;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -55,6 +57,7 @@ export function ResetPassword() {
               </label>
               <input
                 id="password"
+                name="password"
                 type="password"
                 required
                 autoComplete="new-password"
@@ -65,11 +68,30 @@ export function ResetPassword() {
               <PasswordCriteriaList checks={checks} />
             </div>
 
+            <div>
+              <label htmlFor="confirm-password" className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                Confirm new password
+              </label>
+              <input
+                id="confirm-password"
+                name="confirmPassword"
+                type="password"
+                required
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+              />
+              {confirmPassword.length > 0 && !passwordsMatch ? (
+                <p className="mt-1 text-xs text-status-danger">Passwords do not match.</p>
+              ) : null}
+            </div>
+
             {error && <p className="text-sm text-status-danger">{error}</p>}
 
             <button
               type="submit"
-              disabled={submitting || !meetsAll}
+              disabled={submitting || !meetsAll || !passwordsMatch}
               className="w-full rounded-md bg-accent py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
             >
               {submitting ? "Please wait…" : "Set new password"}

@@ -42,6 +42,7 @@ export function ForgotPassword() {
               </label>
               <input
                 id="email"
+                name="email"
                 type="email"
                 required
                 autoComplete="email"
