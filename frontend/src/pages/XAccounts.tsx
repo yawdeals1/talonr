@@ -302,6 +302,10 @@ function buildLoginCommand(os: LoginOs, scriptUrl: string, endpoint: string, tok
       `cd "$env:USERPROFILE\\talonr-login"; ` +
       `Invoke-WebRequest -Uri "${scriptUrl}" -OutFile talonr-login.ts; ` +
       `npm install playwright; ` +
+      // `npm install` alone doesn't reliably fetch the actual browser binary (postinstall can
+      // silently no-op) — chromium.launch() then fails at runtime with "Executable doesn't
+      // exist". This is the fix Playwright's own error message points at.
+      `npx playwright install chromium; ` +
       `npx --yes tsx talonr-login.ts --endpoint "${endpoint}" --token "${token}" --handle "${handle}"`
     );
   }
@@ -309,6 +313,7 @@ function buildLoginCommand(os: LoginOs, scriptUrl: string, endpoint: string, tok
     `mkdir -p ~/talonr-login && cd ~/talonr-login && ` +
     `curl -fsSL "${scriptUrl}" -o talonr-login.ts && ` +
     `npm install playwright && ` +
+    `npx playwright install chromium && ` +
     `npx --yes tsx talonr-login.ts --endpoint "${endpoint}" --token "${token}" --handle "${handle}"`
   );
 }

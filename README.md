@@ -79,8 +79,13 @@ macOS/Linux:
 mkdir -p ~/talonr-login && cd ~/talonr-login && \
   curl -fsSL <script-url> -o talonr-login.ts && \
   npm install playwright && \
+  npx playwright install chromium && \
   npx --yes tsx talonr-login.ts --endpoint <url> --token <connect-token> --handle <x-handle>
 ```
+
+(`npx playwright install chromium` matters — `npm install playwright` alone installs the npm
+package but doesn't reliably fetch the actual browser binary; `chromium.launch()` fails at runtime
+without it.)
 
 This opens a real (headed) Chromium window. Log in manually, complete any 2FA/captcha, and once you
 land on `x.com/home` the script captures the session (cookies + storage) and POSTs it to `POST
