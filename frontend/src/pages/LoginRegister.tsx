@@ -102,11 +102,13 @@ export function LoginRegister() {
               type="password"
               required
               minLength={tab === "login" ? undefined : 8}
-              // Registration deliberately avoids "new-password": that's the value that tells
-              // browsers "this will become a saved credential" and triggers the save-password
-              // prompt right after submit. Login keeps "current-password" so browsers can offer
-              // to autofill (and, there, offer to save) an existing saved credential.
-              autoComplete={tab === "login" ? "current-password" : "off"}
+              // "new-password" is required for Chrome's "Suggest a strong password" feature to
+              // trigger on registration — "off" (tried previously) suppresses that entirely, and
+              // Chrome ignores "off" on password fields anyway (a deliberate browser policy, not
+              // something a site can override), so it wasn't reliably suppressing the save prompt
+              // either. Login keeps "current-password" so browsers can offer to autofill an
+              // existing saved credential there.
+              autoComplete={tab === "login" ? "current-password" : "new-password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
