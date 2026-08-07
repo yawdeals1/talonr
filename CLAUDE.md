@@ -24,7 +24,10 @@ builds the frontend and copies its `dist/` into the root `dist/`, served by the 
 ## Tech stack
 
 - Node.js + TypeScript (ESM, `"type": "module"`), Express 4
-- Drizzle ORM + drizzle-kit, Postgres (via `pg`)
+- Deploro's Studio DB — a REST-only, per-table Postgres API (`src/db/studio-client.ts`) — for all
+  persistence. Not a direct Postgres connection: no ORM, no raw SQL from the app, no `pg`. Schema
+  changes go through `deploro migrate create/apply` against the Studio DB, not a generated
+  migration file in this repo. See "Data model" below for the real constraints this implies.
 - BullMQ + ioredis for the job queue
 - Playwright (chromium) for scraping
 - Deploro Auth-as-a-Service (email+password provider) for identity/credentials; Talonr's own
@@ -45,10 +48,11 @@ production.
 src/
 ├── config/env.ts                     # zod-validated env loader — single source of truth for config
 ├── db/
-│   ├── schema.ts                     # Drizzle tables + enums (6 tables) + FilterDefinition type
-│   ├── relations.ts                  # drizzle relations() for query joins
-│   ├── client.ts                     # pg Pool + drizzle() instance (`db`, `pool`)
-│   └── migrate.ts                    # programmatic migration runner (npm run db:migrate)
+│   ├── schema.ts                     # plain TS row interfaces (6 tables) + FilterDefinition — types only,
+│   │                                    no ORM object; the real schema lives in a `deploro migrate` migration
+│   └── studio-client.ts              # generic REST client for Deploro's Studio DB (list/get/insert/update/
+│                                        delete), camelCase<->snake_case conversion, studioListSorted() for
+│                                        client-side ordering (the Studio API has no ORDER BY)
 ├── modules/
 │   ├── auth/          routes, controller, service, middleware, jwt.ts, password.ts
 │   ├── accounts/       routes, controller, service       — X account CRUD, own-scoped
@@ -77,15 +81,33 @@ src/
 ├── server.ts                         # HTTP entrypoint
 └── worker.ts                         # BullMQ worker entrypoint
 scripts/login.ts                      # standalone headed-Playwright interactive X login capture
-drizzle/migrations/                   # generated SQL migrations (npm run db:generate)
 ```
 
 **Module convention**: every feature module follows `*.routes.ts` (Express Router, wires
 middleware) → `*.controller.ts` (parses/validates request with zod, calls service, shapes
-response) → `*.service.ts` (DB queries via Drizzle, business logic, always scoped by `userId` for
-non-admin paths — never trusts a client-supplied `userId`).
+response) → `*.service.ts` (Studio DB queries via `studio-client.ts`, business logic, always scoped
+by `userId` for non-admin paths — never trusts a client-supplied `userId`).
 
-## Data model (`src/db/schema.ts`)
+## Data model (`src/db/schema.ts` types; real schema applied via `deploro migrate`)
+
+**The Studio DB is a REST-only, per-table API — equality filters only, no ORDER BY, no bulk
+upsert, no joins.** This shapes several service functions in ways worth knowing before touching
+them:
+
+- No `ORDER BY` support at all → every list function sorts client-side via
+  `studioListSorted()` (pages through results up to a cap, then sorts in Node).
+- No bulk/upsert endpoint → `leads.service.ts#upsertLeads` does a bounded-concurrency (8) loop of
+  one GET (existence check by the `user_id`+`handle` unique key) + one POST-or-PATCH per lead,
+  instead of a single `INSERT ... ON CONFLICT`.
+- No range/ILIKE filters → `filter-query-builder.ts#buildFilterPredicate` evaluates bio-keyword,
+  follower-range, and location matching in-process against a capped, fetched set (equality filters
+  like `verifiedOnly`/`sourceType` still push down to shrink what's fetched first). Same for
+  `leads.service.ts#listLeads`'s handle substring search.
+- No ownership-aware `WHERE id = X AND user_id = Y` on a by-id lookup → every "fetch a row I own"
+  path is "fetch by id, then check `row.userId === userId` in code, else `NotFoundError`."
+
+Accepted trade-off for this project's scrape-volume-capped, personal scale — would not hold up
+against a large multi-tenant dataset.
 
 - **users**: id (uuid), email (unique), deploro_account_id (text, unique — the Deploro
   Auth-as-a-Service account this row was auto-provisioned from), role (enum `user`|`admin`,
@@ -101,8 +123,8 @@ non-admin paths — never trusts a client-supplied `userId`).
 - **leads**: id, user_id (FK), handle, display_name, bio, followers (nullable int — see caveat
   below), location, verified (bool), profile_image, source_type, source_ref, first_seen_at,
   last_seen_at. Unique on (user_id, handle) — scrape ingestion (`leads.service.ts#upsertLeads`)
-  does a bulk `INSERT ... ON CONFLICT (user_id, handle) DO UPDATE SET ... = excluded.*` so
-  re-scraping refreshes fields + `last_seen_at` without touching `first_seen_at`.
+  does a bounded-concurrency get-then-insert-or-update loop per lead (see "Data model" intro above)
+  so re-scraping refreshes fields + `last_seen_at` without touching `first_seen_at`.
 - **lead_lists**: id, user_id (FK), name, filter_definition (jsonb:
   `{bioKeywords?: string[], minFollowers?: number, maxFollowers?: number, location?: string,
   verifiedOnly?: boolean}`), created_at
@@ -232,22 +254,26 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 ```
 dev / dev:worker        # tsx watch — local API / worker
 build / start / start:worker   # tsc build then run compiled dist/
-db:generate              # drizzle-kit generate — after changing src/db/schema.ts
-db:migrate                # runs drizzle/migrations/ against DATABASE_URL
-db:studio                  # drizzle-kit studio
 login:x                    # scripts/login.ts — interactive X session capture
 typecheck / lint          # tsc --noEmit / eslint .
 ```
 
+Schema changes are **not** an npm script — they're `deploro migrate create --up-file ... --down-file
+...` followed by `deploro migrate apply`, run against Talonr's Studio DB directly via the `deploro`
+CLI, not tracked as generated files in this repo.
+
 ## Env vars (see `.env.example`)
 
-`DATABASE_URL`, `REDIS_URL`, `SESSION_ENCRYPTION_KEY` (32 bytes, base64 — `openssl rand -base64
-32`), `DEPLORO_AUTH_BASE_URL` (Deploro's platform Worker, hosting the Auth-as-a-Service routes),
-`DEPLORO_PROJECT_SLUG` (default `talonr`), `PORT`, `NODE_ENV`, `COOKIE_SECURE`, `ALLOWED_ORIGIN`,
-`WORKER_CONCURRENCY`, `DEFAULT_DAILY_SCRAPE_LIMIT`, `DEFAULT_MAX_CONCURRENCY_PER_ACCOUNT`,
-`SCRAPE_CAP_LEADS_DEFAULT`, `SCROLL_DELAY_MIN_MS`, `SCROLL_DELAY_MAX_MS`. All validated at boot by
-`src/config/env.ts` (zod) — the process throws immediately on an invalid/missing var rather than
-failing later.
+`REDIS_URL`, `SESSION_ENCRYPTION_KEY` (32 bytes, base64 — `openssl rand -base64 32`),
+`DEPLORO_AUTH_BASE_URL` (Deploro's platform Worker, hosting the Auth-as-a-Service routes),
+`DEPLORO_PROJECT_SLUG` (default `talonr`), `DEPLORO_STUDIO_API_URL` (Talonr's Studio DB REST base,
+`{DEPLORO_AUTH_BASE_URL}/api/projects/{id}/studio`), `DEPLORO_STUDIO_API_TOKEN` (a project-scoped
+Deploro PAT — `deploro token create <name> --project talonr`), `PORT`, `NODE_ENV`, `COOKIE_SECURE`,
+`ALLOWED_ORIGIN`, `WORKER_CONCURRENCY`, `DEFAULT_DAILY_SCRAPE_LIMIT`,
+`DEFAULT_MAX_CONCURRENCY_PER_ACCOUNT`, `SCRAPE_CAP_LEADS_DEFAULT`, `SCROLL_DELAY_MIN_MS`,
+`SCROLL_DELAY_MAX_MS`. All validated at boot by `src/config/env.ts` (zod) — the process throws
+immediately on an invalid/missing var rather than failing later. No `DATABASE_URL` — there is no
+direct Postgres connection anywhere in this app.
 
 ## Login flow
 
@@ -265,3 +291,10 @@ exact command.
 - No refresh-token rotation — Deploro session tokens expire after 7 days, re-login after that.
 - `POST /scrapes/:id/cancel` can't hard-kill an in-flight Playwright run; it only removes
   not-yet-started (waiting/delayed) jobs from the queue.
+- Studio DB constraints (see "Data model" above) mean lead-list filtering and the leads
+  handle-search run in-process over a capped fetch rather than in SQL, and `upsertLeads` is N
+  bounded-concurrency REST calls instead of one bulk statement — both fine at this project's scale,
+  neither would scale to a large multi-tenant dataset.
+- The VPS Postgres container this app used before the Studio DB migration is still provisioned and
+  running, unused, on the shared VPS — the `deploro` CLI has no delete/teardown route for VPS
+  Postgres or Redis specifically, only `vps deploy` for the compute stack as a whole.
