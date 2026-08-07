@@ -8,29 +8,8 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-    # No public "ports:" mapping. The Worker (worker.js) is the only intended internet-facing
-    # caller and now reaches this container through Caddy's TLS termination below — publishing
-    # 3000 directly used to let anyone on the internet talk to the API in plaintext HTTP,
-    # bypassing the Worker/TLS entirely. Still reachable from `caddy`/`worker` over the compose
-    # network by service name on 3000 without a published port.
-    restart: unless-stopped
-
-  # Sole internet-facing entrypoint on this VPS. Terminates real TLS (automatic Let's Encrypt cert,
-  # keyed off CADDY_HOSTNAME — see Caddyfile) and reverse-proxies to the api container over the
-  # private compose network. Replaces the previous plaintext-HTTP Worker-to-VPS hop.
-  caddy:
-    image: caddy:2-alpine
-    depends_on:
-      - api
-    env_file:
-      - ../.env
     ports:
-      - "80:80" # ACME HTTP-01 challenge + HTTP->HTTPS redirect
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
+      - "3000:3000"
     restart: unless-stopped
 
   worker:
@@ -44,7 +23,3 @@ services:
       NODE_ENV: production
     shm_size: "1gb"
     restart: unless-stopped
-
-volumes:
-  caddy_data:
-  caddy_config:

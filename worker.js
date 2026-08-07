@@ -7,11 +7,11 @@
 // mixed-content blocking. The browser only ever talks to this Worker's own
 // domain; the VPS's address never appears client-side.
 //
-// The VPS host lives in a Worker secret (VPS_HOST — set via
-// `deploro hosting set-env`), not hardcoded here, so a VPS migration is a
-// config update through the platform rather than a source edit.
+// The VPS host/port live in Worker secrets (VPS_HOST, VPS_PORT — set via
+// `deploro hosting set-env`), not hardcoded here, so a VPS migration or port
+// change is a config update through the platform rather than a source edit.
 //
-// Platform quirks this works around, confirmed empirically:
+// Two platform quirks this works around, confirmed empirically:
 //   1. Deploro's own *.deploro.app edge reserves /api on every project's
 //      custom domain for its own platform API and 403s (Cloudflare error
 //      1003) before the request reaches this Worker — hence /backend as the
@@ -24,15 +24,17 @@
 //      purchase or setup needed, satisfying that requirement for whatever
 //      VPS_HOST currently is.
 //
-// The VPS's own docker-compose (see docker-compose.yml + Caddyfile) runs a
-// Caddy reverse proxy in front of the api container that automatically
-// obtains a real Let's Encrypt certificate for this same nip.io hostname
-// (CADDY_HOSTNAME there must match VPS_HOST here) and terminates TLS on
-// :443 — the api container itself is no longer reachable on a public port.
-// This fetch is always https:// as a result: previously it was plaintext
-// HTTP straight to the api container's port, which meant every request this
-// Worker forwarded — including login/register bodies and every Bearer
-// token — crossed the public internet unencrypted between here and the VPS.
+// KNOWN GAP: this fetch is plain http://, not https:// — the VPS is shared
+// across multiple Deploro projects and its ports 80/443 already belong to
+// the platform's own nginx, so a per-project Caddy/Let's Encrypt setup on
+// this compute stack can't bind the ports ACME validation requires (a
+// same-VPS Caddy attempt on 2026-08-07 failed with "address already in
+// use" on :80 and broke the public route to this container until reverted
+// — see docker-compose.yml history). Every request this Worker forwards,
+// including login/register bodies and Bearer tokens, crosses the public
+// internet unencrypted until this gets a real fix (an owned domain with a
+// DNS-01 challenge, or a routing rule on the platform's shared nginx that
+// forwards ACME HTTP-01 challenges through to this container).
 const PUBLIC_PREFIX = "/backend";
 
 export default {
@@ -44,7 +46,7 @@ export default {
         return new Response("Worker misconfigured: VPS_HOST secret is not set", { status: 502 });
       }
       const nipHost = `${env.VPS_HOST.replaceAll(".", "-")}.nip.io`;
-      const backendOrigin = `https://${nipHost}`;
+      const backendOrigin = `http://${nipHost}:${env.VPS_PORT ?? "3000"}`;
       const backendPath = "/api" + url.pathname.slice(PUBLIC_PREFIX.length);
       const target = new URL(backendPath + url.search, backendOrigin);
       return fetch(new Request(target, request));
