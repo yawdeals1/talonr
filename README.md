@@ -79,13 +79,15 @@ macOS/Linux:
 mkdir -p ~/talonr-login && cd ~/talonr-login && \
   curl -fsSL <script-url> -o talonr-login.ts && \
   npm install playwright && \
-  npx playwright install chromium && \
+  npx playwright install chrome && \
   npx --yes tsx talonr-login.ts --endpoint <url> --token <connect-token> --handle <x-handle>
 ```
 
-(`npx playwright install chromium` matters — `npm install playwright` alone installs the npm
-package but doesn't reliably fetch the actual browser binary; `chromium.launch()` fails at runtime
-without it.)
+`npx playwright install chrome` matters twice over: `npm install playwright` alone doesn't fetch
+a browser binary at all, and `login.ts` specifically launches the `chrome` channel (a real,
+locally installed Chrome) rather than Playwright's bundled Chromium build — "Sign in with Google"
+(common for logging into X) actively blocks that bundled build with a "This browser or app may
+not be secure" error; real Chrome doesn't trip it.
 
 This opens a real (headed) Chromium window. Log in manually, complete any 2FA/captcha, and once you
 land on `x.com/home` the script captures the session (cookies + storage) and POSTs it to `POST

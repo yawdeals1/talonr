@@ -60,7 +60,19 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const proxy = args.proxy ? parseProxyUrl(args.proxy) : null;
 
-  const browser = await chromium.launch({ headless: false });
+  // channel: "chrome" launches the real, locally installed Chrome rather than Playwright's
+  // bundled Chromium build — needed because "Sign in with Google" (a common way to log into X)
+  // actively blocks that bundled build with a "This browser or app may not be secure" error.
+  // Real Chrome doesn't trip that heuristic. Requires `npx playwright install chrome` once.
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: false, channel: "chrome" });
+  } catch (err) {
+    throw new Error(
+      `Failed to launch Chrome: ${err instanceof Error ? err.message : String(err)}\n` +
+        "Run `npx playwright install chrome` and try again."
+    );
+  }
   const context = await browser.newContext({
     proxy: proxy ? { server: proxy.server, username: proxy.username, password: proxy.password } : undefined,
   });
