@@ -26,7 +26,11 @@ export const scrapeJobStatusEnum = pgEnum("scrape_job_status", [
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
   email: varchar("email", { length: 255 }).notNull().unique(),
-  passwordHash: text("password_hash").notNull(),
+  // Deploro Auth-as-a-Service account id (gallium_platform.auth_accounts.id) — identity and
+  // credentials live in Deploro; this row is auto-provisioned on first successful session
+  // validation and only ever holds local, Talonr-specific state (role, FK anchor for
+  // x_accounts/scrape_jobs/leads/etc). See src/modules/auth/deploro-auth.client.ts.
+  deploroAccountId: text("deploro_account_id").notNull().unique(),
   role: userRoleEnum("role").notNull().default("user"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

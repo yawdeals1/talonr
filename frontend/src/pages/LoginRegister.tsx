@@ -13,6 +13,7 @@ export function LoginRegister() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   if (!isLoading && user) {
@@ -22,14 +23,20 @@ export function LoginRegister() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    setNotice(null);
     setSubmitting(true);
     try {
       if (tab === "login") {
         await login(email, password);
+        navigate("/", { replace: true });
       } else {
-        await register(email, password);
+        // Deploro Auth requires confirming the emailed link before this account can log in —
+        // there's no immediate session to switch to yet.
+        const message = await register(email, password);
+        setTab("login");
+        setPassword("");
+        setNotice(message);
       }
-      navigate("/", { replace: true });
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -54,6 +61,7 @@ export function LoginRegister() {
               onClick={() => {
                 setTab(t);
                 setError(null);
+                setNotice(null);
               }}
               className={`flex-1 rounded-[5px] py-1.5 text-sm font-medium transition-colors ${
                 tab === t
@@ -99,6 +107,7 @@ export function LoginRegister() {
             <p className="mt-1 text-xs text-zinc-500">At least 8 characters.</p>
           </div>
 
+          {notice && <p className="text-sm text-status-success">{notice}</p>}
           {error && <p className="text-sm text-status-danger">{error}</p>}
 
           <button

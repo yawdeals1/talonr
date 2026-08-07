@@ -13,12 +13,13 @@ interface violates X's Terms of Service — keep scrape volume conservative and 
 hardcode aggressive defaults, and auto-pause an account on captcha/login-challenge/rate-limit
 signals rather than retrying blindly.
 
-**No frontend code lives in this repo yet.** The UI is generated separately with Google Stitch from
-`SCREENS.md`. This backend exposes a REST API only. Stitch's generated design output (per-screen
-`code.html` + `screen.png`, dark variant plus a `*_light` counterpart for each, and a consolidated
-`talonr_operator_system/DESIGN.md` design system) is saved at
-`C:\Users\Caleb\OneDrive\Desktop\Talonr\stitch_talonr_operator_console` — this is the source design
-to build the real frontend from when that work starts.
+A React + Vite frontend lives in `frontend/` (built from the Google Stitch design output —
+per-screen `code.html` + `screen.png`, dark variant plus a `*_light` counterpart for each, and a
+consolidated `talonr_operator_system/DESIGN.md` design system — saved at
+`C:\Users\Caleb\OneDrive\Desktop\Talonr\stitch_talonr_operator_console`). It talks to this backend
+over the REST API only, using a Bearer token stored in `localStorage`
+(`frontend/src/lib/tokenStore.ts`) rather than relying on the `talonr_token` cookie. `npm run build`
+builds the frontend and copies its `dist/` into the root `dist/`, served by the same Worker deploy.
 
 ## Tech stack
 
@@ -26,7 +27,9 @@ to build the real frontend from when that work starts.
 - Drizzle ORM + drizzle-kit, Postgres (via `pg`)
 - BullMQ + ioredis for the job queue
 - Playwright (chromium) for scraping
-- JWT (jsonwebtoken) in an httpOnly cookie for auth, bcryptjs for password hashing
+- Deploro Auth-as-a-Service (email+password provider) for identity/credentials; Talonr's own
+  `users` table only holds local role + a pointer to the Deploro account, and never stores a
+  password itself
 - AES-256-GCM (Node's built-in `node:crypto`) for encrypting stored X session cookies and proxy
   credentials
 - zod for request validation, pino for logging
@@ -84,7 +87,9 @@ non-admin paths — never trusts a client-supplied `userId`).
 
 ## Data model (`src/db/schema.ts`)
 
-- **users**: id (uuid), email (unique), password_hash, role (enum `user`|`admin`, default `user`), created_at
+- **users**: id (uuid), email (unique), deploro_account_id (text, unique — the Deploro
+  Auth-as-a-Service account this row was auto-provisioned from), role (enum `user`|`admin`,
+  default `user`), created_at
 - **x_accounts**: id, user_id (FK→users, cascade), handle, encrypted_session (text, nullable —
   null until the login script runs), encrypted_proxy (text, nullable), status (enum
   `active`|`checkpointed`|`banned`, default `active`), daily_scrape_limit (int, default 150),
@@ -112,12 +117,31 @@ deliberately out of scope.
 
 ## Auth (`src/modules/auth/`)
 
-JWT (HS256, `JWT_SECRET`, 7-day expiry, claims `sub`/`email`/`role`) set as an httpOnly cookie
-(`talonr_token`); also accepted via `Authorization: Bearer <token>` for non-browser clients.
-`requireAuth` middleware (`auth.middleware.ts`) populates `req.user`; `requireAdmin` checks
-`req.user.role === 'admin'`. Registration (`POST /api/auth/register`) always forces `role: 'user'`
-— **promoting a user to admin is a manual DB action**: `UPDATE users SET role = 'admin' WHERE
-email = '...'`. Passwords hashed with bcryptjs, cost factor 12.
+Identity and credentials live in **Deploro Auth-as-a-Service** (email+password provider), not in
+Talonr's own database — Talonr's Express API is a thin backend proxy in front of it
+(`deploro-auth.client.ts` calls Deploro's platform Worker at
+`{DEPLORO_AUTH_BASE_URL}/auth/{DEPLORO_PROJECT_SLUG}/*` server-to-server; those endpoints have a
+CORS allowlist that only permits Deploro's own dashboard origins, so a browser can't call them
+directly from Talonr's deployed frontend).
+
+- `POST /api/auth/register` → calls Deploro's `email-password/signup`, returns `202 { message }`.
+  Deploro requires the user to click an emailed confirmation link before they can log in — there is
+  no instant-registration path, by Deploro's design.
+- `POST /api/auth/login` → calls Deploro's `email-password/login`, gets back a Deploro session
+  token, and returns `{ user, token }`. That token is set as the httpOnly `talonr_token` cookie
+  (kept for parity/non-browser clients) and also accepted via `Authorization: Bearer <token>` — the
+  deployed frontend uses the Bearer/`localStorage` path exclusively
+  (`frontend/src/lib/tokenStore.ts`).
+- `requireAuth` (`auth.middleware.ts`) validates that token against Deploro's `GET
+  /auth/{slug}/session` on every request (`auth.service.ts#validateAndSyncUser`), auto-provisioning
+  a local `users` row on first sight of a given `deploro_account_id` — that local row is the FK
+  anchor everywhere else (`x_accounts`, `scrape_jobs`, `leads`, `lead_lists`, `activity_log`) and
+  the only place `role` lives. A short in-memory TTL cache (~60s, in `auth.middleware.ts`) sits in
+  front of that Deploro round trip so it isn't on the hot path for every request. `requireAdmin`
+  checks `req.user.role === 'admin'` exactly as before — **promoting a user to admin is still a
+  manual DB action**: `UPDATE users SET role = 'admin' WHERE email = '...'`.
+- `POST /api/auth/logout` → best-effort revokes the Deploro session
+  (`deploro-auth.client.ts#revokeSession`) before clearing the local cookie.
 
 ## Session & proxy encryption (`src/lib/crypto.ts`, `src/scraper/session-store.ts`)
 
@@ -217,11 +241,13 @@ typecheck / lint          # tsc --noEmit / eslint .
 
 ## Env vars (see `.env.example`)
 
-`DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `SESSION_ENCRYPTION_KEY` (32 bytes, base64 — `openssl
-rand -base64 32`), `PORT`, `NODE_ENV`, `COOKIE_SECURE`, `ALLOWED_ORIGIN`, `WORKER_CONCURRENCY`,
-`DEFAULT_DAILY_SCRAPE_LIMIT`, `DEFAULT_MAX_CONCURRENCY_PER_ACCOUNT`, `SCRAPE_CAP_LEADS_DEFAULT`,
-`SCROLL_DELAY_MIN_MS`, `SCROLL_DELAY_MAX_MS`. All validated at boot by `src/config/env.ts` (zod) —
-the process throws immediately on an invalid/missing var rather than failing later.
+`DATABASE_URL`, `REDIS_URL`, `SESSION_ENCRYPTION_KEY` (32 bytes, base64 — `openssl rand -base64
+32`), `DEPLORO_AUTH_BASE_URL` (Deploro's platform Worker, hosting the Auth-as-a-Service routes),
+`DEPLORO_PROJECT_SLUG` (default `talonr`), `PORT`, `NODE_ENV`, `COOKIE_SECURE`, `ALLOWED_ORIGIN`,
+`WORKER_CONCURRENCY`, `DEFAULT_DAILY_SCRAPE_LIMIT`, `DEFAULT_MAX_CONCURRENCY_PER_ACCOUNT`,
+`SCRAPE_CAP_LEADS_DEFAULT`, `SCROLL_DELAY_MIN_MS`, `SCROLL_DELAY_MAX_MS`. All validated at boot by
+`src/config/env.ts` (zod) — the process throws immediately on an invalid/missing var rather than
+failing later.
 
 ## Login flow
 
@@ -236,6 +262,6 @@ exact command.
 - No follower-count enrichment pass (would multiply scrape volume against X) — `leads.followers`
   is frequently null from list-view scraping.
 - No admin impersonation/session-switching — admin routes are strictly read-only cross-user views.
-- No refresh-token rotation — 7-day JWT expiry, re-login after that.
+- No refresh-token rotation — Deploro session tokens expire after 7 days, re-login after that.
 - `POST /scrapes/:id/cancel` can't hard-kill an in-flight Playwright run; it only removes
   not-yet-started (waiting/delayed) jobs from the queue.

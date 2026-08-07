@@ -9,8 +9,11 @@ const envSchema = z.object({
   // variants above when present, since they avoid a same-host NAT hairpin round trip.
   DATABASE_URL_INTERNAL: z.string().min(1).optional(),
   REDIS_URL_INTERNAL: z.string().min(1).optional(),
-  JWT_SECRET: z.string().min(16),
   SESSION_ENCRYPTION_KEY: z.string().min(1),
+  // Deploro's platform Worker, which hosts the Auth-as-a-Service routes (/auth/:slug/*) used
+  // in place of locally-signed JWTs. See src/modules/auth/deploro-auth.client.ts.
+  DEPLORO_AUTH_BASE_URL: z.string().min(1),
+  DEPLORO_PROJECT_SLUG: z.string().min(1).default("talonr"),
   PORT: z.coerce.number().int().positive().default(3000),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   COOKIE_SECURE: z.coerce.boolean().default(false),

@@ -2,6 +2,7 @@ import type { Response } from "express";
 import { z } from "zod";
 import { env } from "../../config/env.js";
 import { NotFoundError, ValidationError } from "../../lib/errors.js";
+import * as deploroAuth from "./deploro-auth.client.js";
 import type { AuthedRequest } from "./auth.middleware.js";
 import { getUserById, loginUser, registerUser } from "./auth.service.js";
 
@@ -22,13 +23,18 @@ function setAuthCookie(res: Response, token: string) {
   });
 }
 
+function extractToken(req: AuthedRequest): string | undefined {
+  const header = req.headers.authorization;
+  const [scheme, bearerToken] = header?.split(" ") ?? [];
+  return req.cookies?.talonr_token ?? (scheme === "Bearer" ? bearerToken : undefined);
+}
+
 export async function register(req: AuthedRequest, res: Response) {
   const parsed = credentialsSchema.safeParse(req.body);
   if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Invalid request");
 
-  const { user, token } = await registerUser(parsed.data.email, parsed.data.password);
-  setAuthCookie(res, token);
-  res.status(201).json({ user, token });
+  const { message } = await registerUser(parsed.data.email, parsed.data.password);
+  res.status(202).json({ message });
 }
 
 export async function login(req: AuthedRequest, res: Response) {
@@ -40,7 +46,9 @@ export async function login(req: AuthedRequest, res: Response) {
   res.json({ user, token });
 }
 
-export function logout(_req: AuthedRequest, res: Response) {
+export async function logout(req: AuthedRequest, res: Response) {
+  const token = extractToken(req);
+  if (token) await deploroAuth.revokeSession(token);
   res.clearCookie("talonr_token", { path: "/" });
   res.status(204).send();
 }

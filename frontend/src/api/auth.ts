@@ -1,7 +1,7 @@
 import { apiFetch } from "./client";
 import type { User } from "./types";
 
-export function register(email: string, password: string): Promise<{ user: User; token: string }> {
+export function register(email: string, password: string): Promise<{ message: string }> {
   return apiFetch("/auth/register", { method: "POST", body: { email, password } });
 }
 

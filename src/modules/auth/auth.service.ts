@@ -1,10 +1,8 @@
 import { eq } from "drizzle-orm";
 import { db } from "../../db/client.js";
 import { users } from "../../db/schema.js";
-import { ConflictError, UnauthorizedError } from "../../lib/errors.js";
 import { logActivity } from "../activity/activity.service.js";
-import { signJwt } from "./jwt.js";
-import { hashPassword, verifyPassword } from "./password.js";
+import * as deploroAuth from "./deploro-auth.client.js";
 
 export interface PublicUser {
   id: string;
@@ -17,39 +15,35 @@ function toPublicUser(user: typeof users.$inferSelect): PublicUser {
   return { id: user.id, email: user.email, role: user.role, createdAt: user.createdAt };
 }
 
-export async function registerUser(email: string, password: string) {
-  const existing = await db.query.users.findFirst({ where: eq(users.email, email) });
-  if (existing) {
-    throw new ConflictError("An account with this email already exists");
-  }
+/** Finds the local user row for a Deploro account, auto-provisioning one on first sign-in. */
+async function getOrCreateLocalUser(deploroAccountId: string, email: string): Promise<typeof users.$inferSelect> {
+  const existing = await db.query.users.findFirst({ where: eq(users.deploroAccountId, deploroAccountId) });
+  if (existing) return existing;
 
-  const passwordHash = await hashPassword(password);
-  const [user] = await db
-    .insert(users)
-    .values({ email, passwordHash, role: "user" })
-    .returning();
-
-  await logActivity(user.id, "user.registered", { email });
-
-  const token = signJwt({ sub: user.id, email: user.email, role: user.role });
-  return { user: toPublicUser(user), token };
+  const [created] = await db.insert(users).values({ email, deploroAccountId, role: "user" }).returning();
+  await logActivity(created.id, "user.provisioned", { email });
+  return created;
 }
 
-export async function loginUser(email: string, password: string) {
-  const user = await db.query.users.findFirst({ where: eq(users.email, email) });
-  if (!user) {
-    throw new UnauthorizedError("Invalid email or password");
-  }
+export async function registerUser(email: string, password: string): Promise<{ message: string }> {
+  await deploroAuth.signupEmailPassword(email, password);
+  return { message: "Check your email to confirm your account, then log in." };
+}
 
-  const valid = await verifyPassword(password, user.passwordHash);
-  if (!valid) {
-    throw new UnauthorizedError("Invalid email or password");
-  }
+export async function loginUser(email: string, password: string): Promise<{ user: PublicUser; token: string }> {
+  const { token, user: deploroUser } = await deploroAuth.loginEmailPassword(email, password);
+  const localUser = await getOrCreateLocalUser(deploroUser.id, deploroUser.email ?? email);
 
-  await logActivity(user.id, "user.logged_in", { email });
+  await logActivity(localUser.id, "user.logged_in", { email });
 
-  const token = signJwt({ sub: user.id, email: user.email, role: user.role });
-  return { user: toPublicUser(user), token };
+  return { user: toPublicUser(localUser), token };
+}
+
+/** Validates a Deploro session token and returns the matching (auto-provisioned) local user. Used by requireAuth. */
+export async function validateAndSyncUser(token: string): Promise<PublicUser> {
+  const deploroUser = await deploroAuth.validateSession(token);
+  const localUser = await getOrCreateLocalUser(deploroUser.id, deploroUser.email ?? "");
+  return toPublicUser(localUser);
 }
 
 export async function getUserById(id: string): Promise<PublicUser | undefined> {
