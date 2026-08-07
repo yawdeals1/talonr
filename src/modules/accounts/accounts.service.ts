@@ -1,6 +1,6 @@
 import { studioDelete, studioGet, studioInsert, studioList, studioUpdate } from "../../db/studio-client.js";
 import type { XAccount } from "../../db/schema.js";
-import { NotFoundError } from "../../lib/errors.js";
+import { NotFoundError, ValidationError } from "../../lib/errors.js";
 
 export interface PublicXAccount {
   id: string;
@@ -65,7 +65,18 @@ export async function updateAccount(
     status: "active" | "checkpointed" | "banned";
   }>
 ): Promise<PublicXAccount> {
-  await findOwnedOrThrow(userId, accountId);
+  const existing = await findOwnedOrThrow(userId, accountId);
+
+  // `checkpointed` is set automatically by the worker on captcha/login-challenge/rate-limit
+  // detection — the whole point is to stop retrying against X until a human re-verifies via the
+  // login script. Letting the owner flip it straight back to `active` here would let them silently
+  // bypass that safety check the instant it trips.
+  if (input.status === "active" && existing.status !== "active") {
+    throw new ValidationError(
+      "Cannot reactivate a checkpointed or banned account this way — re-run the login script to resume scraping."
+    );
+  }
+
   const account = await studioUpdate<XAccount>("x_accounts", accountId, input);
   return toPublic(account);
 }

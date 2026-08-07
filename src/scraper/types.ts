@@ -1,5 +1,12 @@
 import type { Page } from "playwright";
 
+// sourceRef format guards, shared between scrapes.controller.ts (rejects bad input before a job
+// is ever enqueued) and the source modules themselves (defense in depth against SSRF — sourceRef
+// ends up in page.goto() inside the worker's Playwright browser, so it must never be an arbitrary
+// attacker-controlled URL).
+export const X_HANDLE_PATTERN = /^@?[A-Za-z0-9_]{1,15}$/;
+export const X_TWEET_URL_PATTERN = /^https:\/\/(?:x\.com|twitter\.com)\/[A-Za-z0-9_]{1,15}\/status\/\d+(?:\/likes)?\/?$/;
+
 export interface RawLead {
   handle: string;
   displayName: string | null;

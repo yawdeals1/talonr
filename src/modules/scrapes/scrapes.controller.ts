@@ -1,15 +1,37 @@
 import type { Response } from "express";
 import { z } from "zod";
 import { ValidationError } from "../../lib/errors.js";
+import { X_HANDLE_PATTERN, X_TWEET_URL_PATTERN } from "../../scraper/types.js";
 import type { AuthedRequest } from "../auth/auth.middleware.js";
 import { cancelScrapeJob, createScrapeJob, getScrapeJob, listScrapeJobs } from "./scrapes.service.js";
 
-const createSchema = z.object({
-  xAccountId: z.string().uuid(),
-  sourceType: z.enum(["search", "followers", "likers"]),
-  sourceRef: z.string().min(1),
-  capLeads: z.number().int().positive().max(1000).optional(),
-});
+// sourceRef ends up in the worker's Playwright page.goto() (see scraper/sources/*.source.ts) — for
+// "followers"/"likers" it must be constrained to X's own handle/tweet-URL shape, or a user could
+// point the scrape worker's browser at an arbitrary URL (SSRF against internal network/cloud
+// metadata endpoints). "search" stays free-form since it's a genuine keyword query, never a URL.
+const createSchema = z
+  .object({
+    xAccountId: z.string().uuid(),
+    sourceType: z.enum(["search", "followers", "likers"]),
+    sourceRef: z.string().min(1).max(2000),
+    capLeads: z.number().int().positive().max(1000).optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.sourceType === "followers" && !X_HANDLE_PATTERN.test(data.sourceRef)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["sourceRef"],
+        message: "sourceRef must be an X handle (letters, numbers, underscore, max 15 chars)",
+      });
+    }
+    if (data.sourceType === "likers" && !X_TWEET_URL_PATTERN.test(data.sourceRef)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["sourceRef"],
+        message: "sourceRef must be a full x.com/twitter.com tweet URL",
+      });
+    }
+  });
 
 const listQuerySchema = z.object({
   status: z.enum(["queued", "running", "completed", "failed", "paused"]).optional(),

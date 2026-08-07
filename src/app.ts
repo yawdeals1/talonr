@@ -6,6 +6,7 @@ import { env } from "./config/env.js";
 import { studioList } from "./db/studio-client.js";
 import { redisConnection } from "./queue/connection.js";
 import { errorHandler } from "./lib/errors.js";
+import { logger } from "./lib/logger.js";
 import { accountsRouter } from "./modules/accounts/accounts.routes.js";
 import { adminRouter } from "./modules/admin/admin.routes.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
@@ -26,7 +27,10 @@ app.get("/api/health", async (_req, res) => {
     await redisConnection.ping();
     res.json({ status: "ok" });
   } catch (err) {
-    res.status(503).json({ status: "unavailable", error: err instanceof Error ? err.message : String(err) });
+    // Publicly reachable, unauthenticated — never echo internal exception details (Studio DB/Redis
+    // error text) back to the caller. Log server-side instead.
+    logger.error({ err }, "health check failed");
+    res.status(503).json({ status: "unavailable" });
   }
 });
 
