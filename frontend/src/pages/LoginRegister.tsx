@@ -20,7 +20,6 @@ export function LoginRegister() {
 
   const { checks: passwordChecks, meetsAll: passwordMeetsCriteria } = usePasswordCriteria(password);
   const passwordsMatch = confirmPassword.length > 0 && password === confirmPassword;
-  const registerReady = passwordMeetsCriteria && passwordsMatch;
 
   if (!isLoading && user) {
     return <Navigate to="/" replace />;
@@ -37,6 +36,20 @@ export function LoginRegister() {
     e.preventDefault();
     setError(null);
     setNotice(null);
+
+    // Validated on submit (with a clear message) rather than by silently disabling the button —
+    // a disabled button with no visible reason reads as broken.
+    if (tab === "register") {
+      if (!passwordMeetsCriteria) {
+        setError("Password does not meet the requirements above.");
+        return;
+      }
+      if (!passwordsMatch) {
+        setError("Passwords do not match.");
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
       if (tab === "login") {
@@ -156,7 +169,7 @@ export function LoginRegister() {
 
           <button
             type="submit"
-            disabled={submitting || (tab === "register" && !registerReady)}
+            disabled={submitting}
             className="w-full rounded-md bg-accent py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             {submitting ? "Please wait…" : tab === "login" ? "Log in" : "Create account"}

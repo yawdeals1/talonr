@@ -22,6 +22,18 @@ export function ResetPassword() {
     e.preventDefault();
     if (!token) return;
     setError(null);
+
+    // Validated on submit (with a clear message) rather than by silently disabling the button —
+    // a disabled button with no visible reason reads as broken.
+    if (!meetsAll) {
+      setError("Password does not meet the requirements above.");
+      return;
+    }
+    if (!passwordsMatch) {
+      setError("Passwords do not match.");
+      return;
+    }
+
     setSubmitting(true);
     try {
       await authApi.resetPassword(token, password);
@@ -91,7 +103,7 @@ export function ResetPassword() {
 
             <button
               type="submit"
-              disabled={submitting || !meetsAll || !passwordsMatch}
+              disabled={submitting}
               className="w-full rounded-md bg-accent py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
             >
               {submitting ? "Please wait…" : "Set new password"}
