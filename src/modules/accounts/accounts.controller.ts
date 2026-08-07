@@ -72,7 +72,10 @@ export async function connectToken(req: AuthedRequest, res: Response) {
   res.json(await getConnectToken(req.user!.id, req.params.id));
 }
 
-export async function loginScript(_req: AuthedRequest, res: Response) {
+// No requireAuth on this route either (see accounts.routes.ts) — has to be fetchable by a plain
+// terminal command (curl/Invoke-WebRequest) with no browser session, and the file itself holds no
+// secrets (it's the same source already public in the repo).
+export async function loginScript(_req: Request, res: Response) {
   const contents = await readFile(LOGIN_SCRIPT_PATH, "utf8");
   res.type("text/plain").setHeader("Content-Disposition", 'attachment; filename="talonr-login.ts"').send(contents);
 }

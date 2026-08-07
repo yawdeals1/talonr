@@ -68,22 +68,29 @@ because most Talonr users are *not* the operator running this repo — they're s
 on the deployed frontend and has none of those secrets, possibly not even a clone of this repo.
 
 The normal path is entirely through the web app: add an account, then the "Finish connecting"
-dialog gives you a **Download talonr-login.ts** link and a ready-to-run command with a short-lived
-(15 min), single-account connect token baked in:
+dialog gives you one copy-pasteable command (picked for your OS — Windows/PowerShell or
+macOS/Linux) with a short-lived (15 min), single-account connect token baked in. It fetches the
+script into a fixed folder and runs it from there in the same command — deliberately not a
+separate "download the file, then run it" step, since that leaves the user to notice their browser
+saved it to Downloads while their terminal is sitting somewhere else. For example, on
+macOS/Linux:
 
 ```
-npm install playwright   # once
-npx tsx talonr-login.ts --endpoint <url> --token <connect-token> --handle <x-handle> \
-  [--proxy http://user:pass@host:port]
+mkdir -p ~/talonr-login && cd ~/talonr-login && \
+  curl -fsSL <script-url> -o talonr-login.ts && \
+  npm install playwright && \
+  npx --yes tsx talonr-login.ts --endpoint <url> --token <connect-token> --handle <x-handle>
 ```
 
 This opens a real (headed) Chromium window. Log in manually, complete any 2FA/captcha, and once you
 land on `x.com/home` the script captures the session (cookies + storage) and POSTs it to `POST
 /api/accounts/session`, authenticated by the connect token rather than a login session. The server
 encrypts it with `SESSION_ENCRYPTION_KEY` and updates the `x_accounts` row the token was scoped to
-— the script itself never touches that key. If you're the operator working locally, `npm run
-login:x -- --endpoint <url> --token <connect-token> --handle <x-handle>` runs the same file as a
-convenience wrapper.
+— the script itself never touches that key. `GET /api/accounts/login-script` (the script's raw
+source) needs no auth at all, since it holds no secrets and a plain terminal command has no browser
+session cookie to send anyway. If you're the operator working locally, `npm run login:x --
+--endpoint <url> --token <connect-token> --handle <x-handle>` runs the same file as a convenience
+wrapper.
 
 The encrypted session is only ever decrypted inside the worker process, right before launching a
 scrape; no API response (including admin routes) ever returns it.

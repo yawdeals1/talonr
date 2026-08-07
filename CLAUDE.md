@@ -237,7 +237,7 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 | POST | /accounts | auth | Create an x_account row (handle + optional limits) — session is captured separately via `scripts/login.ts` |
 | GET | /accounts/:id | auth | Own account detail |
 | GET | /accounts/:id/connect-token | auth | Mint a short-lived (15 min), account-scoped connect token for `scripts/login.ts` |
-| GET | /accounts/login-script | auth | Download `scripts/login.ts` as a standalone file (no repo checkout needed) |
+| GET | /accounts/login-script | public | `scripts/login.ts`'s raw source, plain text — no secrets in it, and fetched by a terminal command with no browser session, so it can't require auth |
 | POST | /accounts/session | connect token | `scripts/login.ts` posts a captured `storageState`/proxy back here, authenticated by the connect token instead of a Deploro session — listed in `app.ts`'s `PUBLIC_API_PATHS` for that reason, not because it's actually open |
 | PATCH | /accounts/:id | auth | Update dailyScrapeLimit / maxConcurrency / status |
 | DELETE | /accounts/:id | auth | Delete own account (cascades scrape_jobs) |
@@ -299,11 +299,20 @@ It launches a **headed** Playwright browser, waits for manual login, captures
 The web app's "Finish connecting" screen (`frontend/src/pages/XAccounts.tsx`) is the actual
 distribution path: it calls `GET /accounts/:id/connect-token` to mint a token scoped to that one
 account (`lib/connect-token.ts` — HMAC-signed, 15-minute TTL, verified server-side in
-`accounts.controller.ts#saveSession`, never persisted), and links to `GET /accounts/login-script`
-to download `scripts/login.ts` itself as a plain file. Encryption still only ever happens
-server-side in `accounts.service.ts#saveAccountSession` (via `session-store.ts`) — the script never
-sees `SESSION_ENCRYPTION_KEY` and the raw `storageState` only exists in transit over that one POST.
-`npm run login:x` still works locally as a convenience wrapper around the same file.
+`accounts.controller.ts#saveSession`, never persisted), and builds one OS-specific,
+copy-pasteable shell command (`buildLoginCommand` in `XAccounts.tsx`) that fetches
+`scripts/login.ts`'s source from `GET /accounts/login-script` into a fixed folder
+(`~/talonr-login`) and runs it from there in the same command — not a separate "download it, then
+remember where your browser put it" step, which is exactly what broke in practice: the browser's
+Downloads folder and wherever the terminal happens to be aren't the same place. Both
+`/accounts/session` and `/accounts/login-script` are listed in `app.ts`'s `PUBLIC_API_PATHS` —
+not because they're actually open, but because a terminal command has no browser session cookie to
+send; `/session` authenticates via the connect token instead, and `/login-script` needs no auth at
+all since the file itself holds no secrets (it's the same source already public in the repo).
+Encryption still only ever happens server-side in `accounts.service.ts#saveAccountSession` (via
+`session-store.ts`) — the script never sees `SESSION_ENCRYPTION_KEY` and the raw `storageState`
+only exists in transit over that one POST. `npm run login:x` still works locally as a convenience
+wrapper around the same file.
 
 ## Known limitations / non-goals
 

@@ -284,8 +284,38 @@ function ConnectAccountModal({
   );
 }
 
+type LoginOs = "windows" | "unix";
+
+function detectOs(): LoginOs {
+  return typeof navigator !== "undefined" && navigator.userAgent.includes("Windows") ? "windows" : "unix";
+}
+
+// A separate "download the file" step relies on the user knowing where their browser saves
+// downloads and remembering to cd there before running the next command — that mismatch (browser
+// Downloads folder vs. wherever the terminal happens to be) is exactly what broke this in
+// practice. Instead, one pasteable command fetches the script into a fixed folder and immediately
+// runs it from that same folder, so there's no location to keep track of.
+function buildLoginCommand(os: LoginOs, scriptUrl: string, endpoint: string, token: string, handle: string): string {
+  if (os === "windows") {
+    return (
+      `mkdir -Force "$env:USERPROFILE\\talonr-login" | Out-Null; ` +
+      `cd "$env:USERPROFILE\\talonr-login"; ` +
+      `Invoke-WebRequest -Uri "${scriptUrl}" -OutFile talonr-login.ts; ` +
+      `npm install playwright; ` +
+      `npx --yes tsx talonr-login.ts --endpoint "${endpoint}" --token "${token}" --handle "${handle}"`
+    );
+  }
+  return (
+    `mkdir -p ~/talonr-login && cd ~/talonr-login && ` +
+    `curl -fsSL "${scriptUrl}" -o talonr-login.ts && ` +
+    `npm install playwright && ` +
+    `npx --yes tsx talonr-login.ts --endpoint "${endpoint}" --token "${token}" --handle "${handle}"`
+  );
+}
+
 function FinishConnectingModal({ account, onClose }: { account: XAccount; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
+  const [os, setOs] = useState<LoginOs>(detectOs);
   const tokenQuery = useQuery({
     queryKey: ["connect-token", account.id],
     queryFn: () => getConnectToken(account.id),
@@ -296,26 +326,34 @@ function FinishConnectingModal({ account, onClose }: { account: XAccount; onClos
   const scriptUrl = absoluteApiUrl("/accounts/login-script");
   const endpoint = absoluteApiUrl("/accounts/session");
   const command = tokenQuery.data
-    ? `npx tsx talonr-login.ts --endpoint ${endpoint} --token ${tokenQuery.data.token} --handle ${account.handle}`
+    ? buildLoginCommand(os, scriptUrl, endpoint, tokenQuery.data.token, account.handle)
     : null;
 
   return (
     <Modal title="Finish connecting" onClose={onClose}>
       <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
         @{account.handle} has been added, but its X session hasn't been captured yet. X's login can't be
-        automated (2FA/captchas), so this runs on your own machine as a standalone script — it only needs
-        Node.js and Playwright, not this project's source or server secrets.
+        automated (2FA/captchas), so this runs on your own machine — it only needs Node.js and Playwright,
+        not this project's source or server secrets. Paste the one command below into a terminal; it
+        downloads a small script and opens a browser window for you to log in as @{account.handle}.
       </p>
 
-      <ol className="mb-3 list-decimal space-y-1.5 pl-4 text-sm text-zinc-600 dark:text-zinc-400">
-        <li>
-          <a href={scriptUrl} download="talonr-login.ts" className="text-accent underline">
-            Download talonr-login.ts
-          </a>
-          , then once: <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-xs dark:bg-zinc-800">npm install playwright</code>
-        </li>
-        <li>Run the command below to open a browser window and log in as @{account.handle}:</li>
-      </ol>
+      <div className="mb-2 flex gap-1 text-xs">
+        <button
+          type="button"
+          onClick={() => setOs("windows")}
+          className={`rounded border px-2 py-1 font-medium ${os === "windows" ? "border-accent text-accent" : "hover:bg-zinc-50 dark:hover:bg-zinc-800"}`}
+        >
+          Windows (PowerShell)
+        </button>
+        <button
+          type="button"
+          onClick={() => setOs("unix")}
+          className={`rounded border px-2 py-1 font-medium ${os === "unix" ? "border-accent text-accent" : "hover:bg-zinc-50 dark:hover:bg-zinc-800"}`}
+        >
+          macOS / Linux
+        </button>
+      </div>
 
       {tokenQuery.isLoading && <p className="mb-3 text-xs text-zinc-500">Generating a connect token…</p>}
       {tokenQuery.isError && (
@@ -326,8 +364,8 @@ function FinishConnectingModal({ account, onClose }: { account: XAccount; onClos
 
       {command && tokenQuery.data && (
         <>
-          <div className="mb-1 flex items-center justify-between gap-2 rounded-md border bg-zinc-50 px-3 py-2 font-mono text-xs dark:bg-zinc-800">
-            <code className="overflow-x-auto whitespace-nowrap">{command}</code>
+          <div className="mb-1 flex items-start justify-between gap-2 rounded-md border bg-zinc-50 px-3 py-2 font-mono text-xs dark:bg-zinc-800">
+            <code className="overflow-x-auto whitespace-pre-wrap break-all">{command}</code>
             <button
               type="button"
               onClick={() => {

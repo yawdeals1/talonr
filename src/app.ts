@@ -52,6 +52,9 @@ const PUBLIC_API_PATHS = [
   // whatever machine the account owner is on. "Public" only in the sense that this backstop's
   // Deploro-session check doesn't apply; accounts.controller.ts#saveSession still verifies it.
   "/api/accounts/session",
+  // Genuinely public: scripts/login.ts's own source, no secrets in it. Has to be fetchable by a
+  // plain terminal command with no browser session at all — see accounts.controller.ts#loginScript.
+  "/api/accounts/login-script",
 ];
 
 function isPublicApiPath(path: string): boolean {

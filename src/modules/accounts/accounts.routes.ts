@@ -12,11 +12,14 @@ export const accountsRouter = Router();
 // account-scoped connect token instead (see connectToken route + lib/connect-token.ts).
 accountsRouter.post("/session", asyncHandler(saveSession));
 
+// Also ahead of requireAuth (and in PUBLIC_API_PATHS) — this serves scripts/login.ts's own source,
+// which holds no secrets (it's the same file already public in the repo). Gating it behind the
+// browser's session cookie broke the one thing that needed to fetch it: a plain terminal command
+// (curl/Invoke-WebRequest) run from a machine that was never logged into the web app at all.
+accountsRouter.get("/login-script", asyncHandler(loginScript));
+
 accountsRouter.use(requireAuth);
 accountsRouter.get("/", asyncHandler(list));
-// Must come before "/:id" — both are one-segment GETs, and requireUuidParam would otherwise
-// reject "login-script" as a bad :id before this ever matches.
-accountsRouter.get("/login-script", asyncHandler(loginScript));
 accountsRouter.get("/:id", requireUuidParam("id"), asyncHandler(get));
 accountsRouter.get("/:id/connect-token", requireUuidParam("id"), asyncHandler(connectToken));
 accountsRouter.post("/", asyncHandler(create));
