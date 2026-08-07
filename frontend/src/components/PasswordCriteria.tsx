@@ -6,7 +6,6 @@ export const PASSWORD_CRITERIA: { label: string; test: (pw: string) => boolean }
   { label: "One lowercase letter", test: (pw) => /[a-z]/.test(pw) },
   { label: "One uppercase letter", test: (pw) => /[A-Z]/.test(pw) },
   { label: "One number", test: (pw) => /[0-9]/.test(pw) },
-  { label: "One special character", test: (pw) => /[^A-Za-z0-9]/.test(pw) },
 ];
 
 export function usePasswordCriteria(password: string) {
