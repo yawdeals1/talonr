@@ -12,23 +12,31 @@ export const likersSource: ScrapeSource = {
     if (!X_TWEET_URL_PATTERN.test(sourceRef)) {
       throw new Error("sourceRef must be a full x.com/twitter.com tweet URL");
     }
-    // Land on the tweet itself, not a cold-loaded .../likes URL. X's likers list is a
-    // client-side overlay reached by clicking the tweet's own "Likes" stat — a fresh
-    // page.goto straight to .../likes never mounts that overlay, so the only
-    // [data-testid="UserCell"]-shaped element on the page ends up being the tweet's own
-    // author header, and every scrape "found" exactly one lead: the tweet's author.
-    return sourceRef.split(/[?#]/)[0]!.replace(/\/+$/, "").replace(/\/likes$/, "");
+    const trimmed = sourceRef.split(/[?#]/)[0]!.replace(/\/+$/, "");
+    return trimmed.endsWith("/likes") ? trimmed : `${trimmed}/likes`;
   },
   async waitForReady(page: Page) {
-    const tweet = page.locator('article[data-testid="tweet"]').first();
-    await tweet.waitFor({ timeout: 15000 });
-    await tweet.locator('a[href$="/likes"]').click({ timeout: 15000 });
+    await page.waitForSelector('[data-testid="UserCell"], article[data-testid="tweet"]', { timeout: 15000 });
+    // Verified live (2026-08-08, against a real tweet, in an authenticated session): X silently
+    // bounces .../status/:id/likes back to the base tweet URL instead of rendering the likers
+    // list — reproduced on a fresh page.goto, and again via a simulated in-app route transition,
+    // so it isn't a "cold nav vs. client nav" issue. Cause is unconfirmed (X Premium-gating the
+    // likers list, or a client-router regression on X's end are both plausible), but either way
+    // this app has no working path to the real list right now. Without this check, the page just
+    // silently shows the tweet's own author in the "Relevant people" sidebar — which shares the
+    // UserCell markup — and every scrape "found" exactly one lead: the tweet's author. Fail
+    // loudly instead of shipping that mislabeled data.
+    if (!page.url().replace(/\/+$/, "").endsWith("/likes")) {
+      throw new Error(
+        "X did not show the likers list for this tweet (it redirected back to the tweet itself) — " +
+          "likers scraping isn't currently working against X's web client"
+      );
+    }
     await page.waitForSelector('[data-testid="UserCell"]', { timeout: 15000 });
   },
   async extractVisibleItems(page: Page): Promise<RawLead[]> {
-    // The tweet's own author header can still be mounted in the DOM behind the likers
-    // overlay (it's a modal, not a full navigation) and shares the UserCell markup — drop
-    // it so the tweet's author never gets counted as one of its own likers.
+    // Defense in depth: if X's own header/sidebar author card is ever still mounted alongside a
+    // genuine likers list, don't let the tweet's author masquerade as one of its own likers.
     const authorHandle = new URL(page.url()).pathname.split("/")[1]?.toLowerCase();
     const items = await extractUserCells(page);
     return authorHandle ? items.filter((item) => item.handle.toLowerCase() !== authorHandle) : items;
