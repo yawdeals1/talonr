@@ -12,7 +12,7 @@ export const likersSource: ScrapeSource = {
     if (!X_TWEET_URL_PATTERN.test(sourceRef)) {
       throw new Error("sourceRef must be a full x.com/twitter.com tweet URL");
     }
-    const trimmed = sourceRef.replace(/\/+$/, "");
+    const trimmed = sourceRef.split(/[?#]/)[0]!.replace(/\/+$/, "");
     return trimmed.endsWith("/likes") ? trimmed : `${trimmed}/likes`;
   },
   async waitForReady(page: Page) {

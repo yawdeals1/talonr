@@ -5,7 +5,8 @@ import type { Page } from "playwright";
 // ends up in page.goto() inside the worker's Playwright browser, so it must never be an arbitrary
 // attacker-controlled URL).
 export const X_HANDLE_PATTERN = /^@?[A-Za-z0-9_]{1,15}$/;
-export const X_TWEET_URL_PATTERN = /^https:\/\/(?:x\.com|twitter\.com)\/[A-Za-z0-9_]{1,15}\/status\/\d+(?:\/likes)?\/?$/;
+export const X_TWEET_URL_PATTERN =
+  /^https:\/\/(?:x\.com|twitter\.com)\/[A-Za-z0-9_]{1,15}\/status\/\d+(?:\/likes)?\/?(?:[?#].*)?$/;
 
 export interface RawLead {
   handle: string;
