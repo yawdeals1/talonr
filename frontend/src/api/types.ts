@@ -26,7 +26,11 @@ export interface AdminXAccount extends XAccount {
   userId: string;
 }
 
-export type SourceType = "search" | "followers" | "likers";
+// "likers" is legacy-only — X made "who liked a post" private platform-wide in June 2024, so it
+// stays filterable for old data but can no longer be scraped. New engagement scrapes use
+// "engagers" (replies and/or retweets, see EngagementType).
+export type SourceType = "search" | "followers" | "likers" | "engagers";
+export type EngagementType = "repliers" | "retweeters";
 export type ScrapeJobStatus = "queued" | "running" | "completed" | "failed" | "paused";
 
 export interface ScrapeJob {
@@ -35,6 +39,7 @@ export interface ScrapeJob {
   xAccountId: string;
   sourceType: SourceType;
   sourceRef: string;
+  engagementTypes: EngagementType[] | null;
   status: ScrapeJobStatus;
   leadsFound: number;
   errorMessage: string | null;

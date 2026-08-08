@@ -6,7 +6,11 @@
 
 export type UserRole = "user" | "admin";
 export type XAccountStatus = "active" | "checkpointed" | "banned";
-export type SourceType = "search" | "followers" | "likers";
+// "likers" is legacy-only (X made "who liked a post" private platform-wide in June 2024, with
+// no workaround — see the retweeters/repliers source modules) — kept solely so historical
+// scrape_jobs/leads rows still typecheck; new jobs can no longer be created with it.
+export type SourceType = "search" | "followers" | "likers" | "engagers";
+export type EngagementType = "repliers" | "retweeters";
 export type ScrapeJobStatus = "queued" | "running" | "completed" | "failed" | "paused";
 
 export interface User {
@@ -43,6 +47,9 @@ export interface ScrapeJob {
   xAccountId: string;
   sourceType: SourceType;
   sourceRef: string;
+  // Only set (and only meaningful) when sourceType is "engagers" — which of the two engagement
+  // strategies (repliers, retweeters) this job was asked to run. Null for every other source type.
+  engagementTypes: EngagementType[] | null;
   status: ScrapeJobStatus;
   leadsFound: number;
   errorMessage: string | null;

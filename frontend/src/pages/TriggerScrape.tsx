@@ -4,7 +4,7 @@ import { useNavigate } from "react-router";
 import { listAccounts } from "../api/accounts";
 import { ApiError } from "../api/client";
 import { createScrape } from "../api/scrapes";
-import type { SourceType } from "../api/types";
+import type { EngagementType, SourceType } from "../api/types";
 import { SkeletonRows } from "../components/Skeleton";
 
 const SOURCE_TYPES: { value: SourceType; label: string; description: string; fieldLabel: string; placeholder: string }[] = [
@@ -23,12 +23,19 @@ const SOURCE_TYPES: { value: SourceType; label: string; description: string; fie
     placeholder: "elonmusk",
   },
   {
-    value: "likers",
-    label: "Likers",
-    description: "Scrape the likers of a specific tweet.",
+    value: "engagers",
+    label: "Engagers",
+    // X made "who liked a post" private platform-wide in June 2024 with no workaround, so
+    // engagement scraping is built on what's still public: replies and retweets.
+    description: "Scrape the people who replied to and/or retweeted a specific tweet.",
     fieldLabel: "Tweet URL",
     placeholder: "https://x.com/user/status/12345",
   },
+];
+
+const ENGAGEMENT_TYPES: { value: EngagementType; label: string }[] = [
+  { value: "repliers", label: "Repliers (comments)" },
+  { value: "retweeters", label: "Retweeters (reposts)" },
 ];
 
 export function TriggerScrape() {
@@ -38,6 +45,7 @@ export function TriggerScrape() {
   const [xAccountId, setXAccountId] = useState("");
   const [sourceType, setSourceType] = useState<SourceType>("search");
   const [sourceRef, setSourceRef] = useState("");
+  const [engagementTypes, setEngagementTypes] = useState<EngagementType[]>(["repliers", "retweeters"]);
   const [capLeads, setCapLeads] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const idPrefix = useId();
@@ -51,6 +59,10 @@ export function TriggerScrape() {
   const activeAccounts = accounts.filter((a) => a.status === "active");
   const sourceMeta = SOURCE_TYPES.find((s) => s.value === sourceType)!;
 
+  function toggleEngagementType(type: EngagementType) {
+    setEngagementTypes((prev) => (prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]));
+  }
+
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setFormError(null);
@@ -63,13 +75,23 @@ export function TriggerScrape() {
       setFormError(`${sourceMeta.fieldLabel} is required.`);
       return;
     }
+    if (sourceType === "engagers" && engagementTypes.length === 0) {
+      setFormError("Select at least one engagement type (repliers, retweeters).");
+      return;
+    }
     const cap = capLeads ? Number(capLeads) : undefined;
     if (cap !== undefined && (cap < 1 || cap > 1000)) {
       setFormError("Lead cap must be between 1 and 1000.");
       return;
     }
 
-    mutation.mutate({ xAccountId, sourceType, sourceRef: sourceRef.trim(), capLeads: cap });
+    mutation.mutate({
+      xAccountId,
+      sourceType,
+      sourceRef: sourceRef.trim(),
+      engagementTypes: sourceType === "engagers" ? engagementTypes : undefined,
+      capLeads: cap,
+    });
   }
 
   if (accountsQuery.isLoading) {
@@ -160,6 +182,25 @@ export function TriggerScrape() {
             className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
           />
         </div>
+
+        {sourceType === "engagers" && (
+          <div>
+            <span className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">Engagement types</span>
+            <div className="space-y-2">
+              {ENGAGEMENT_TYPES.map((t) => (
+                <label key={t.value} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={engagementTypes.includes(t.value)}
+                    onChange={() => toggleEngagementType(t.value)}
+                    className="h-4 w-4 rounded border-zinc-300 accent-accent"
+                  />
+                  {t.label}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div>
           <label

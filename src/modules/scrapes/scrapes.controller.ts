@@ -6,14 +6,19 @@ import type { AuthedRequest } from "../auth/auth.middleware.js";
 import { cancelScrapeJob, createScrapeJob, getScrapeJob, listScrapeJobs } from "./scrapes.service.js";
 
 // sourceRef ends up in the worker's Playwright page.goto() (see scraper/sources/*.source.ts) — for
-// "followers"/"likers" it must be constrained to X's own handle/tweet-URL shape, or a user could
+// "followers"/"engagers" it must be constrained to X's own handle/tweet-URL shape, or a user could
 // point the scrape worker's browser at an arbitrary URL (SSRF against internal network/cloud
 // metadata endpoints). "search" stays free-form since it's a genuine keyword query, never a URL.
+//
+// "likers" is deliberately not creatable here — X made "who liked a post" private platform-wide
+// in June 2024 with no workaround, so every likers job would just fail. It stays a legal
+// SourceType only so historical rows still typecheck (see db/schema.ts).
 const createSchema = z
   .object({
     xAccountId: z.string().uuid(),
-    sourceType: z.enum(["search", "followers", "likers"]),
+    sourceType: z.enum(["search", "followers", "engagers"]),
     sourceRef: z.string().min(1).max(2000),
+    engagementTypes: z.array(z.enum(["repliers", "retweeters"])).min(1).optional(),
     capLeads: z.number().int().positive().max(1000).optional(),
   })
   .superRefine((data, ctx) => {
@@ -24,12 +29,21 @@ const createSchema = z
         message: "sourceRef must be an X handle (letters, numbers, underscore, max 15 chars)",
       });
     }
-    if (data.sourceType === "likers" && !X_TWEET_URL_PATTERN.test(data.sourceRef)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["sourceRef"],
-        message: "sourceRef must be a full x.com/twitter.com tweet URL",
-      });
+    if (data.sourceType === "engagers") {
+      if (!X_TWEET_URL_PATTERN.test(data.sourceRef)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sourceRef"],
+          message: "sourceRef must be a full x.com/twitter.com tweet URL",
+        });
+      }
+      if (!data.engagementTypes || data.engagementTypes.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["engagementTypes"],
+          message: "Select at least one engagement type (repliers, retweeters)",
+        });
+      }
     }
   });
 

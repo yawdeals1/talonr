@@ -1,10 +1,11 @@
 import { apiFetch } from "./client";
-import type { ScrapeJob, ScrapeJobStatus, SourceType } from "./types";
+import type { EngagementType, ScrapeJob, ScrapeJobStatus, SourceType } from "./types";
 
 export interface CreateScrapeInput {
   xAccountId: string;
   sourceType: SourceType;
   sourceRef: string;
+  engagementTypes?: EngagementType[];
   capLeads?: number;
 }
 

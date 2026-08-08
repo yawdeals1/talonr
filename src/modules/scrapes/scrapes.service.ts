@@ -1,13 +1,14 @@
 import { env } from "../../config/env.js";
 import { studioGet, studioInsert, studioListSorted, studioUpdate } from "../../db/studio-client.js";
-import type { ScrapeJob, XAccount } from "../../db/schema.js";
+import type { EngagementType, ScrapeJob, XAccount } from "../../db/schema.js";
 import { NotFoundError, ValidationError } from "../../lib/errors.js";
 import { scrapeQueue } from "../../queue/queues.js";
 
 export interface CreateScrapeInput {
   xAccountId: string;
-  sourceType: "search" | "followers" | "likers";
+  sourceType: "search" | "followers" | "engagers";
   sourceRef: string;
+  engagementTypes?: EngagementType[];
   capLeads?: number;
 }
 
@@ -26,6 +27,7 @@ export async function createScrapeJob(userId: string, input: CreateScrapeInput) 
     xAccountId: input.xAccountId,
     sourceType: input.sourceType,
     sourceRef: input.sourceRef,
+    engagementTypes: input.engagementTypes ?? null,
     status: "queued",
   });
 
@@ -37,6 +39,7 @@ export async function createScrapeJob(userId: string, input: CreateScrapeInput) 
       xAccountId: input.xAccountId,
       sourceType: input.sourceType,
       sourceRef: input.sourceRef,
+      engagementTypes: input.engagementTypes,
       capLeads: input.capLeads ?? env.SCRAPE_CAP_LEADS_DEFAULT,
     },
     { jobId: job.id }

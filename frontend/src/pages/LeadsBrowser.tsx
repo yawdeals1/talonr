@@ -9,7 +9,8 @@ import { LeadsTable } from "../components/LeadsTable";
 import { SkeletonRows } from "../components/Skeleton";
 
 const PAGE_SIZE = 50;
-const SOURCE_TYPES: SourceType[] = ["search", "followers", "likers"];
+// "likers" stays filterable for leads scraped before X locked down likes visibility in June 2024.
+const SOURCE_TYPES: SourceType[] = ["search", "followers", "likers", "engagers"];
 
 export function LeadsBrowser() {
   const [handle, setHandle] = useState("");

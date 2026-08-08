@@ -6,7 +6,9 @@ import { getLead, listLeads } from "./leads.service.js";
 
 const listQuerySchema = z.object({
   handle: z.string().optional(),
-  sourceType: z.enum(["search", "followers", "likers"]).optional(),
+  // "likers" stays filterable so historical leads scraped before X locked down likes visibility
+  // (June 2024) are still browsable — new leads can no longer be scraped with that source type.
+  sourceType: z.enum(["search", "followers", "likers", "engagers"]).optional(),
   page: z.coerce.number().int().positive().optional(),
   pageSize: z.coerce.number().int().positive().optional(),
 });

@@ -1,12 +1,12 @@
 import { studioGet, studioInsert, studioList, studioListSorted, studioUpdate } from "../../db/studio-client.js";
-import type { Lead } from "../../db/schema.js";
+import type { Lead, SourceType } from "../../db/schema.js";
 import { mapWithConcurrency } from "../../lib/concurrency.js";
 import { NotFoundError } from "../../lib/errors.js";
 import type { RawLead } from "../../scraper/types.js";
 
 export interface ListLeadsOptions {
   handle?: string;
-  sourceType?: "search" | "followers" | "likers";
+  sourceType?: SourceType;
   page?: number;
   pageSize?: number;
 }
@@ -21,7 +21,7 @@ const UPSERT_CONCURRENCY = 8;
  */
 export async function upsertLeads(
   userId: string,
-  sourceType: "search" | "followers" | "likers",
+  sourceType: "search" | "followers" | "engagers",
   sourceRef: string,
   rawLeads: RawLead[]
 ): Promise<number> {
