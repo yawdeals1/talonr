@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useId, useState, type FormEvent } from "react";
-import { createAccount, deleteAccount, getConnectToken, listAccounts, updateAccount } from "../api/accounts";
+import { useEffect, useId, useState, type FormEvent } from "react";
+import { createAccount, deleteAccount, getAccount, getConnectToken, listAccounts, updateAccount } from "../api/accounts";
 import { absoluteApiUrl, ApiError } from "../api/client";
 import { listScrapes } from "../api/scrapes";
 import type { XAccount, XAccountStatus } from "../api/types";
@@ -327,9 +327,17 @@ function buildLoginCommand(
 }
 
 function FinishConnectingModal({ account, onClose }: { account: XAccount; onClose: () => void }) {
+  const queryClient = useQueryClient();
   const [copied, setCopied] = useState(false);
   const [os, setOs] = useState<LoginOs>(detectOs);
   const [importCookies, setImportCookies] = useState(false);
+  // Frozen at mount: login.ts runs as a separate terminal process the browser has no visibility
+  // into, so the only way to notice it finished is to poll for a change from this baseline —
+  // hasSession flips false->true for a brand-new account, or lastUsedAt moves forward and status
+  // returns to "active" for a checkpointed account being reconnected. Plain hasSession isn't
+  // enough on its own since a checkpointed account already has hasSession: true from before.
+  const [baseline] = useState({ lastUsedAt: account.lastUsedAt, hasSession: account.hasSession });
+
   const tokenQuery = useQuery({
     queryKey: ["connect-token", account.id],
     queryFn: () => getConnectToken(account.id),
@@ -337,11 +345,46 @@ function FinishConnectingModal({ account, onClose }: { account: XAccount; onClos
     gcTime: 0,
   });
 
+  const statusQuery = useQuery({
+    queryKey: ["account-status", account.id],
+    queryFn: () => getAccount(account.id),
+    refetchInterval: (query) => (isConnected(query.state.data?.account) ? false : 3000),
+  });
+
+  function isConnected(a: XAccount | undefined): boolean {
+    if (!a) return false;
+    if (!baseline.hasSession) return a.hasSession;
+    return a.status === "active" && a.lastUsedAt !== null && a.lastUsedAt !== baseline.lastUsedAt;
+  }
+
+  const connected = isConnected(statusQuery.data?.account);
+
+  useEffect(() => {
+    if (connected) queryClient.invalidateQueries({ queryKey: ["accounts"] });
+  }, [connected, queryClient]);
+
   const scriptUrl = absoluteApiUrl("/accounts/login-script");
   const endpoint = absoluteApiUrl("/accounts/session");
   const command = tokenQuery.data
     ? buildLoginCommand(os, scriptUrl, endpoint, tokenQuery.data.token, account.handle, importCookies)
     : null;
+
+  if (connected) {
+    return (
+      <Modal title="Finish connecting" onClose={onClose}>
+        <p className="mb-4 rounded border border-status-success-bg bg-status-success-bg px-3 py-2 text-sm text-status-success">
+          Connected — session captured for @{account.handle}. It's active in the dashboard now.
+        </p>
+        <button
+          type="button"
+          onClick={onClose}
+          className="w-full rounded-md bg-accent py-2 text-sm font-medium text-white hover:opacity-90"
+        >
+          Done
+        </button>
+      </Modal>
+    );
+  }
 
   return (
     <Modal title="Finish connecting" onClose={onClose}>
@@ -357,6 +400,10 @@ function FinishConnectingModal({ account, onClose }: { account: XAccount; onClos
         Google blocks automated browser sessions outright and that button will fail. If this account only
         has Google sign-in, set an X password first in a normal browser (Settings → Your account → Change
         password), then come back and use that.
+      </p>
+
+      <p className="mb-3 text-xs text-zinc-500">
+        This page will update on its own once the script finishes — no need to refresh or check the terminal.
       </p>
 
       <div className="mb-2 flex gap-1 text-xs">
