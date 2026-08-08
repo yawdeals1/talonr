@@ -65,6 +65,7 @@ export interface FilterDefinition {
   maxFollowers?: number;
   location?: string;
   verifiedOnly?: boolean;
+  maxLeads?: number;
 }
 
 export interface LeadList {

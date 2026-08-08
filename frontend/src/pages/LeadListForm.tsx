@@ -24,6 +24,7 @@ export function LeadListForm() {
   const [maxFollowers, setMaxFollowers] = useState("");
   const [location, setLocation] = useState("");
   const [verifiedOnly, setVerifiedOnly] = useState(false);
+  const [maxLeads, setMaxLeads] = useState("");
   const idPrefix = useId();
 
   useEffect(() => {
@@ -35,6 +36,7 @@ export function LeadListForm() {
     setMaxFollowers(list.filterDefinition.maxFollowers?.toString() ?? "");
     setLocation(list.filterDefinition.location ?? "");
     setVerifiedOnly(list.filterDefinition.verifiedOnly ?? false);
+    setMaxLeads(list.filterDefinition.maxLeads?.toString() ?? "");
   }, [existingQuery.data]);
 
   const mutation = useMutation({
@@ -54,6 +56,7 @@ export function LeadListForm() {
       maxFollowers: maxFollowers ? Number(maxFollowers) : undefined,
       location: location.trim() || undefined,
       verifiedOnly: verifiedOnly || undefined,
+      maxLeads: maxLeads ? Number(maxLeads) : undefined,
     };
     mutation.mutate(filterDefinition);
   }
@@ -158,6 +161,24 @@ export function LeadListForm() {
           />
           Verified only
         </label>
+
+        <div>
+          <label
+            htmlFor={`${idPrefix}-max-leads`}
+            className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+          >
+            Max leads <span className="text-zinc-400">(optional)</span>
+          </label>
+          <input
+            id={`${idPrefix}-max-leads`}
+            type="number"
+            min={1}
+            value={maxLeads}
+            onChange={(e) => setMaxLeads(e.target.value)}
+            placeholder="No limit"
+            className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+          />
+        </div>
 
         {error && <p className="text-sm text-status-danger">{error}</p>}
 

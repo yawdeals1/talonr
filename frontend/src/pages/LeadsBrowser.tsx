@@ -46,11 +46,13 @@ export function LeadsBrowser() {
             setSourceType(e.target.value as SourceType | "");
             setPage(1);
           }}
-          className="rounded-md border bg-transparent px-3 py-1.5 text-sm outline-none focus:border-accent"
+          className="rounded-md border bg-transparent px-3 py-1.5 text-sm text-zinc-900 outline-none focus:border-accent dark:text-zinc-100"
         >
-          <option value="">All sources</option>
+          <option value="" className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
+            All sources
+          </option>
           {SOURCE_TYPES.map((s) => (
-            <option key={s} value={s}>
+            <option key={s} value={s} className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
               {s}
             </option>
           ))}

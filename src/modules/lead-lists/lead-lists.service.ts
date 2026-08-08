@@ -56,8 +56,9 @@ export async function evaluateLeadList(userId: string, id: string, page = 1, pag
   );
 
   const matched = candidates.filter(predicate);
+  const capped = list.filterDefinition.maxLeads ? matched.slice(0, list.filterDefinition.maxLeads) : matched;
   const start = (page - 1) * size;
-  const rows = matched.slice(start, start + size);
+  const rows = capped.slice(start, start + size);
 
   return { list, leads: rows, page, pageSize: size };
 }

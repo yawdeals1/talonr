@@ -73,6 +73,9 @@ export interface FilterDefinition {
   maxFollowers?: number;
   location?: string;
   verifiedOnly?: boolean;
+  // Caps the total number of matched leads a list evaluation returns (across all pages), not a
+  // per-page size — see lead-lists.service.ts#evaluateLeadList.
+  maxLeads?: number;
 }
 
 export interface LeadList {

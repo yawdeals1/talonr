@@ -15,7 +15,10 @@ export function buildFilterPredicate(filter: FilterDefinition): (lead: Lead) => 
       if (!filter.bioKeywords.some((keyword) => bio.includes(keyword.toLowerCase()))) return false;
     }
 
-    if (filter.minFollowers !== undefined) {
+    // minFollowers === 0 is a no-op bound (every non-negative count already satisfies "at least
+    // 0"), so it must not exclude leads with an unknown (null) follower count the way a real
+    // lower bound does — otherwise typing "0" as "no minimum" silently zeroes out every result.
+    if (filter.minFollowers !== undefined && filter.minFollowers > 0) {
       if (lead.followers === null || lead.followers < filter.minFollowers) return false;
     }
 

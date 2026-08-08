@@ -99,11 +99,18 @@ export function TriggerScrape() {
               id={`${idPrefix}-account`}
               value={xAccountId}
               onChange={(e) => setXAccountId(e.target.value)}
-              className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+              className="w-full rounded-md border bg-transparent px-3 py-2 text-sm text-zinc-900 outline-none focus:border-accent dark:text-zinc-100"
             >
-              <option value="">Select an account…</option>
+              <option value="" className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
+                Select an account…
+              </option>
               {accounts.map((a) => (
-                <option key={a.id} value={a.id} disabled={a.status !== "active"}>
+                <option
+                  key={a.id}
+                  value={a.id}
+                  disabled={a.status !== "active"}
+                  className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100"
+                >
                   @{a.handle} {a.status !== "active" ? `(${a.status})` : ""}
                 </option>
               ))}

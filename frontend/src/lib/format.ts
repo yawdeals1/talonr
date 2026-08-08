@@ -42,6 +42,7 @@ export function summarizeFilter(filter: {
   maxFollowers?: number;
   location?: string;
   verifiedOnly?: boolean;
+  maxLeads?: number;
 }): string {
   const parts: string[] = [];
   if (filter.bioKeywords && filter.bioKeywords.length > 0) {
@@ -57,6 +58,9 @@ export function summarizeFilter(filter: {
   }
   if (filter.verifiedOnly) {
     parts.push("verified only");
+  }
+  if (filter.maxLeads !== undefined) {
+    parts.push(`max ${formatNumber(filter.maxLeads)} leads`);
   }
   return parts.length > 0 ? parts.join(" · ") : "No filters — matches all leads";
 }

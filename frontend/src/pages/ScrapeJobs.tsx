@@ -47,11 +47,13 @@ export function ScrapeJobs() {
         <select
           value={status}
           onChange={(e) => setStatus(e.target.value as ScrapeJobStatus | "")}
-          className="rounded-md border bg-transparent px-3 py-1.5 text-sm outline-none focus:border-accent"
+          className="rounded-md border bg-transparent px-3 py-1.5 text-sm text-zinc-900 outline-none focus:border-accent dark:text-zinc-100"
         >
-          <option value="">All statuses</option>
+          <option value="" className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
+            All statuses
+          </option>
           {STATUS_OPTIONS.map((s) => (
-            <option key={s} value={s}>
+            <option key={s} value={s} className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
               {s}
             </option>
           ))}
@@ -59,11 +61,13 @@ export function ScrapeJobs() {
         <select
           value={xAccountId}
           onChange={(e) => setXAccountId(e.target.value)}
-          className="rounded-md border bg-transparent px-3 py-1.5 text-sm outline-none focus:border-accent"
+          className="rounded-md border bg-transparent px-3 py-1.5 text-sm text-zinc-900 outline-none focus:border-accent dark:text-zinc-100"
         >
-          <option value="">All accounts</option>
+          <option value="" className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
+            All accounts
+          </option>
           {accounts.map((a) => (
-            <option key={a.id} value={a.id}>
+            <option key={a.id} value={a.id} className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
               @{a.handle}
             </option>
           ))}

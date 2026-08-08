@@ -56,11 +56,13 @@ export function AdminActivity() {
             setUserId(e.target.value);
             setPage(1);
           }}
-          className="rounded-md border bg-transparent px-3 py-1.5 text-sm outline-none focus:border-accent"
+          className="rounded-md border bg-transparent px-3 py-1.5 text-sm text-zinc-900 outline-none focus:border-accent dark:text-zinc-100"
         >
-          <option value="">All users</option>
+          <option value="" className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
+            All users
+          </option>
           {users.map((u) => (
-            <option key={u.id} value={u.id}>
+            <option key={u.id} value={u.id} className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
               {u.email}
             </option>
           ))}
@@ -71,11 +73,13 @@ export function AdminActivity() {
             setAction(e.target.value);
             setPage(1);
           }}
-          className="rounded-md border bg-transparent px-3 py-1.5 text-sm outline-none focus:border-accent"
+          className="rounded-md border bg-transparent px-3 py-1.5 text-sm text-zinc-900 outline-none focus:border-accent dark:text-zinc-100"
         >
-          <option value="">All actions</option>
+          <option value="" className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
+            All actions
+          </option>
           {Object.entries(ACTION_LABELS).map(([value, label]) => (
-            <option key={value} value={value}>
+            <option key={value} value={value} className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
               {label}
             </option>
           ))}

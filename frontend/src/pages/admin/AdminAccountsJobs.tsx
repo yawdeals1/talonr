@@ -47,11 +47,13 @@ export function AdminAccountsJobs() {
           <select
             value={userId}
             onChange={(e) => updateParam("userId", e.target.value)}
-            className="rounded-md border bg-transparent px-3 py-1.5 text-sm outline-none focus:border-accent"
+            className="rounded-md border bg-transparent px-3 py-1.5 text-sm text-zinc-900 outline-none focus:border-accent dark:text-zinc-100"
           >
-            <option value="">All users (jobs only)</option>
+            <option value="" className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
+              All users (jobs only)
+            </option>
             {users.map((u) => (
-              <option key={u.id} value={u.id}>
+              <option key={u.id} value={u.id} className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
                 {u.email}
               </option>
             ))}
@@ -59,11 +61,13 @@ export function AdminAccountsJobs() {
           <select
             value={status}
             onChange={(e) => updateParam("status", e.target.value)}
-            className="rounded-md border bg-transparent px-3 py-1.5 text-sm outline-none focus:border-accent"
+            className="rounded-md border bg-transparent px-3 py-1.5 text-sm text-zinc-900 outline-none focus:border-accent dark:text-zinc-100"
           >
-            <option value="">All statuses</option>
+            <option value="" className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
+              All statuses
+            </option>
             {STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>
+              <option key={s} value={s} className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
                 {s}
               </option>
             ))}

@@ -564,11 +564,17 @@ function EditAccountModal({
             id={`${idPrefix}-status`}
             value={status}
             onChange={(e) => setStatus(e.target.value as XAccountStatus)}
-            className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+            className="w-full rounded-md border bg-transparent px-3 py-2 text-sm text-zinc-900 outline-none focus:border-accent dark:text-zinc-100"
           >
-            <option value="active">active</option>
-            <option value="checkpointed">checkpointed</option>
-            <option value="banned">banned</option>
+            <option value="active" className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
+              active
+            </option>
+            <option value="checkpointed" className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
+              checkpointed
+            </option>
+            <option value="banned" className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
+              banned
+            </option>
           </select>
         </div>
         {error && <p className="text-sm text-status-danger">{error}</p>}

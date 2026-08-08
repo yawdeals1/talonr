@@ -17,6 +17,7 @@ const filterDefinitionSchema = z.object({
   maxFollowers: z.number().int().nonnegative().optional(),
   location: z.string().optional(),
   verifiedOnly: z.boolean().optional(),
+  maxLeads: z.number().int().positive().optional(),
 });
 
 const createSchema = z.object({
