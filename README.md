@@ -108,6 +108,16 @@ wrapper.
 The encrypted session is only ever decrypted inside the worker process, right before launching a
 scrape; no API response (including admin routes) ever returns it.
 
+**If X itself blocks the automated login** (the "Finish connecting" checkbox for this, or add
+`--import-cookies` yourself) — confirmed to happen even in real Chrome with nothing else
+automated: X's own bot/fraud detection (Arkose Labs, Socure) can outright block a CDP-automated
+login attempt, visible as an unresponsive "Continue" button plus CSP errors in DevTools around
+`arkoselabs.com`/`socure.io`. That's a deliberate anti-bot control on X's side, not a bug here, and
+this tool won't try to spoof or evade it. Instead, `--import-cookies` skips driving a login
+entirely: it prompts for `auth_token` and `ct0` (required) plus `twid`/`guest_id` (optional),
+copied out of a regular, already-logged-in, non-automated browser's DevTools → Application →
+Cookies → `https://x.com`. Only those specific values are read.
+
 ## Running a scrape
 
 1. Register/login to get a session token (returned in the response body and also set as an httpOnly

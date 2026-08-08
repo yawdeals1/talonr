@@ -292,9 +292,21 @@ account owner is at — which, for any user besides the operator, means a machin
 of this repo and no access to `DEPLORO_STUDIO_API_TOKEN` or `SESSION_ENCRYPTION_KEY`.
 `scripts/login.ts` is written to that constraint: it has **zero internal imports** — no
 `studio-client.ts`, no `lib/crypto.ts`, no `session-store.ts` — only `playwright` and the network.
-It launches a **headed** Playwright browser, waits for manual login, captures
-`context.storageState()`, and POSTs it (plus any `--proxy` credentials) as JSON to `POST
-/api/accounts/session`, authenticated with a connect token instead of a Deploro session.
+It launches a **headed** Playwright browser (`channel: "chrome"` — real installed Chrome, not
+Playwright's bundled Chromium build), waits for manual login, captures `context.storageState()`,
+and POSTs it (plus any `--proxy` credentials) as JSON to `POST /api/accounts/session`,
+authenticated with a connect token instead of a Deploro session.
+
+X's own bot/fraud detection (Arkose Labs, Socure — both visible in X's CSP allowlist) can block
+that automated login outright regardless of the Chrome binary underneath, since it detects the
+CDP-automated session itself — confirmed live, not hypothetical. This tool deliberately does not
+try to spoof or evade that detection. The fallback is `--import-cookies`
+(`captureViaCookieImport` in `login.ts`), which skips driving a login entirely: it prompts for
+`auth_token`/`ct0` (required) and `twid`/`guest_id` (optional), copied out of DevTools on a
+regular, already-authenticated browser, and builds a minimal `storageState` from just those. Uses
+the readline async-iterator form (`rl[Symbol.asyncIterator]()`), not repeated `rl.question()`
+calls — the latter silently hangs after the first prompt when stdin isn't a real TTY, a real bug
+caught by testing this against piped/redirected stdin before shipping it.
 
 The web app's "Finish connecting" screen (`frontend/src/pages/XAccounts.tsx`) is the actual
 distribution path: it calls `GET /accounts/:id/connect-token` to mint a token scoped to that one

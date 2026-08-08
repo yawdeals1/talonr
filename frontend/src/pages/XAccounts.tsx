@@ -295,32 +295,41 @@ function detectOs(): LoginOs {
 // Downloads folder vs. wherever the terminal happens to be) is exactly what broke this in
 // practice. Instead, one pasteable command fetches the script into a fixed folder and immediately
 // runs it from that same folder, so there's no location to keep track of.
-function buildLoginCommand(os: LoginOs, scriptUrl: string, endpoint: string, token: string, handle: string): string {
+function buildLoginCommand(
+  os: LoginOs,
+  scriptUrl: string,
+  endpoint: string,
+  token: string,
+  handle: string,
+  importCookies: boolean
+): string {
+  // login.ts has a static `import { chromium } from "playwright"` at the top regardless of mode,
+  // so `npm install playwright` always has to run. Only the browser *binary* download (slow, and
+  // genuinely unused in cookie-import mode since no browser is launched) is safe to skip.
+  const runArgs = `--endpoint "${endpoint}" --token "${token}" --handle "${handle}"${importCookies ? " --import-cookies" : ""}`;
   if (os === "windows") {
     return (
       `mkdir -Force "$env:USERPROFILE\\talonr-login" | Out-Null; ` +
       `cd "$env:USERPROFILE\\talonr-login"; ` +
       `Invoke-WebRequest -Uri "${scriptUrl}" -OutFile talonr-login.ts; ` +
       `npm install playwright; ` +
-      // `npm install` alone doesn't fetch a browser binary — and login.ts specifically launches
-      // the "chrome" channel (real installed Chrome, not Playwright's bundled Chromium), because
-      // Google's sign-in flow blocks that bundled build outright.
-      `npx playwright install chrome; ` +
-      `npx --yes tsx talonr-login.ts --endpoint "${endpoint}" --token "${token}" --handle "${handle}"`
+      (importCookies ? "" : `npx playwright install chrome; `) +
+      `npx --yes tsx talonr-login.ts ${runArgs}`
     );
   }
   return (
     `mkdir -p ~/talonr-login && cd ~/talonr-login && ` +
     `curl -fsSL "${scriptUrl}" -o talonr-login.ts && ` +
     `npm install playwright && ` +
-    `npx playwright install chrome && ` +
-    `npx --yes tsx talonr-login.ts --endpoint "${endpoint}" --token "${token}" --handle "${handle}"`
+    (importCookies ? "" : `npx playwright install chrome && `) +
+    `npx --yes tsx talonr-login.ts ${runArgs}`
   );
 }
 
 function FinishConnectingModal({ account, onClose }: { account: XAccount; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   const [os, setOs] = useState<LoginOs>(detectOs);
+  const [importCookies, setImportCookies] = useState(false);
   const tokenQuery = useQuery({
     queryKey: ["connect-token", account.id],
     queryFn: () => getConnectToken(account.id),
@@ -331,7 +340,7 @@ function FinishConnectingModal({ account, onClose }: { account: XAccount; onClos
   const scriptUrl = absoluteApiUrl("/accounts/login-script");
   const endpoint = absoluteApiUrl("/accounts/session");
   const command = tokenQuery.data
-    ? buildLoginCommand(os, scriptUrl, endpoint, tokenQuery.data.token, account.handle)
+    ? buildLoginCommand(os, scriptUrl, endpoint, tokenQuery.data.token, account.handle, importCookies)
     : null;
 
   return (
@@ -366,6 +375,30 @@ function FinishConnectingModal({ account, onClose }: { account: XAccount; onClos
           macOS / Linux
         </button>
       </div>
+
+      <label className="mb-3 flex items-start gap-2 text-xs text-zinc-600 dark:text-zinc-400">
+        <input
+          type="checkbox"
+          checked={importCookies}
+          onChange={(e) => setImportCookies(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span>
+          X blocked the automated login (Continue does nothing, or DevTools shows errors around{" "}
+          <code className="font-mono">arkoselabs.com</code>/<code className="font-mono">socure.io</code>)? Use
+          cookie import instead — no browser gets automated at all.
+        </span>
+      </label>
+
+      {importCookies && (
+        <p className="mb-3 rounded border border-status-warning-bg bg-status-warning-bg px-2 py-1.5 text-xs text-status-warning">
+          The command will prompt you to paste cookie values. Get them from a regular (non-automated) browser
+          you're already logged into X with: DevTools (F12) → Application tab → Cookies →{" "}
+          <code className="font-mono">https://x.com</code>. You need <code className="font-mono">auth_token</code>{" "}
+          and <code className="font-mono">ct0</code> — <code className="font-mono">twid</code> and{" "}
+          <code className="font-mono">guest_id</code> are optional. Only those specific values are read.
+        </p>
+      )}
 
       {tokenQuery.isLoading && <p className="mb-3 text-xs text-zinc-500">Generating a connect token…</p>}
       {tokenQuery.isError && (
