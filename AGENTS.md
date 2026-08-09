@@ -167,10 +167,18 @@ directly from Talonr's deployed frontend).
   Deploro requires the user to click an emailed confirmation link before they can log in — there is
   no instant-registration path, by Deploro's design. `registerSchema`
   (`auth.controller.ts`) also rejects disposable/temporary email domains before the request ever
-  reaches Deploro, via `isDisposableEmail` (`src/lib/disposable-email.ts`), checked against the
-  `disposable-email-domains` npm package's exact + wildcard-suffix domain lists (~121k entries,
-  community-maintained). Blocklist-based, so it only catches domains the list already knows about —
-  scoped to registration only, not login/reset, so accounts that predate this check keep working.
+  reaches Deploro, via `isDisposableEmail` (`src/lib/disposable-email.ts`). Seeded from the bundled
+  `disposable-email-domains` npm package (offline/cold-start fallback only — services like
+  10minutemail.net rotate through freshly-registered front-end domains faster than any pinned
+  package version tracks; a real one, `laoia.com`, got through the bundled-only version of this
+  check the same day it shipped), then kept current by fetching the actively-maintained
+  `disposable-email-domains/disposable-email-domains` GitHub blocklist:
+  `refreshDisposableEmailBlocklist()` runs once at server boot (`server.ts`, awaited, ~5s-bounded,
+  best-effort) and `startDisposableEmailBlocklistRefresh()` re-runs it every 24h in the background
+  (`setInterval(...).unref()`, never blocks a request). `isDisposableEmail` itself stays pure/
+  synchronous — no I/O on the request path, no network dependency in tests. Still
+  fundamentally a blocklist, so it only catches domains someone has already reported — scoped to
+  registration only, not login/reset, so accounts that predate this check keep working.
 - `POST /api/auth/login` → calls Deploro's `email-password/login`, gets back a Deploro session
   token, sets it as the httpOnly `talonr_token` cookie, and also returns it in the response body as
   `{ user, token }` for non-browser API consumers (also accepted via `Authorization: Bearer
