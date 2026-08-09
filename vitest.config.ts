@@ -12,6 +12,7 @@ export default defineConfig({
       DEPLORO_AUTH_BASE_URL: "http://localhost:9999",
       DEPLORO_STUDIO_API_URL: "http://localhost:9999/studio",
       DEPLORO_STUDIO_API_TOKEN: "test-token",
+      TURNSTILE_SECRET: "test-turnstile-secret",
     },
   },
 });

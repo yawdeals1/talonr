@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate } from "react-router";
 import { ApiError } from "../api/client";
 import { PasswordCriteriaList, usePasswordCriteria } from "../components/PasswordCriteria";
+import { TurnstileWidget } from "../components/TurnstileWidget";
 import { useAuth } from "../context/AuthContext";
 
 type Tab = "login" | "register";
@@ -17,6 +18,8 @@ export function LoginRegister() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileResetKey, setTurnstileResetKey] = useState(0);
 
   const { checks: passwordChecks, meetsAll: passwordMeetsCriteria } = usePasswordCriteria(password);
   const passwordsMatch = confirmPassword.length > 0 && password === confirmPassword;
@@ -48,6 +51,10 @@ export function LoginRegister() {
         setError("Passwords do not match.");
         return;
       }
+      if (!turnstileToken) {
+        setError("Please complete the verification check.");
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -58,7 +65,7 @@ export function LoginRegister() {
       } else {
         // Deploro Auth requires confirming the emailed link before this account can log in —
         // there's no immediate session to switch to yet.
-        const message = await register(email, password);
+        const message = await register(email, password, turnstileToken!);
         switchTab("login");
         setPassword("");
         setNotice(message);
@@ -71,6 +78,12 @@ export function LoginRegister() {
       }
     } finally {
       setSubmitting(false);
+      if (tab === "register") {
+        // Turnstile tokens are single-use (siteverify consumes it whether or not the rest of
+        // the request succeeds) — force a fresh challenge for the next attempt either way.
+        setTurnstileToken(null);
+        setTurnstileResetKey((k) => k + 1);
+      }
     }
   }
 
@@ -165,6 +178,10 @@ export function LoginRegister() {
                 <p className="mt-1 text-xs text-status-danger">Passwords do not match.</p>
               ) : null}
             </div>
+          ) : null}
+
+          {tab === "register" ? (
+            <TurnstileWidget onToken={setTurnstileToken} resetKey={turnstileResetKey} />
           ) : null}
 
           {notice && <p className="text-sm text-status-success">{notice}</p>}

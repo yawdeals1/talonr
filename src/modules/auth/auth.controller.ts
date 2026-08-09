@@ -1,8 +1,10 @@
 import type { Response } from "express";
 import { z } from "zod";
 import { env } from "../../config/env.js";
-import { NotFoundError, ValidationError } from "../../lib/errors.js";
+import { ForbiddenError, NotFoundError, ValidationError } from "../../lib/errors.js";
 import { isDisposableEmail } from "../../lib/disposable-email.js";
+import { byIp } from "../../lib/rate-limit.js";
+import { verifyTurnstileToken } from "../../lib/turnstile.js";
 import * as deploroAuth from "./deploro-auth.client.js";
 import type { AuthedRequest } from "./auth.middleware.js";
 import { getUserById, loginUser, registerUser, requestPasswordReset as requestPasswordResetService, resetPassword as resetPasswordService } from "./auth.service.js";
@@ -32,6 +34,7 @@ const registerSchema = z.object({
       message: "Disposable or temporary email addresses are not allowed. Please use a permanent email address.",
     }),
   password: passwordCriteriaSchema,
+  turnstileToken: z.string().min(1, "Verification check is required"),
 });
 
 const requestResetSchema = z.object({
@@ -64,6 +67,11 @@ function extractToken(req: AuthedRequest): string | undefined {
 export async function register(req: AuthedRequest, res: Response) {
   const parsed = registerSchema.safeParse(req.body);
   if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Invalid request");
+
+  // Verified before anything else touches Deploro — a failed/missing/replayed Turnstile token
+  // never reaches the disposable-email check or the signup call itself.
+  const verified = await verifyTurnstileToken(parsed.data.turnstileToken, byIp(req));
+  if (!verified) throw new ForbiddenError("Verification check failed. Please try again.");
 
   const { message } = await registerUser(parsed.data.email, parsed.data.password);
   res.status(202).json({ message });

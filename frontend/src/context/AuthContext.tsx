@@ -6,7 +6,7 @@ interface AuthContextValue {
   user: User | null;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string) => Promise<string>;
+  register: (email: string, password: string, turnstileToken: string) => Promise<string>;
   logout: () => Promise<void>;
 }
 
@@ -31,10 +31,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(user);
   }, []);
 
-  const register = useCallback(async (email: string, password: string) => {
+  const register = useCallback(async (email: string, password: string, turnstileToken: string) => {
     // Deploro Auth requires confirming an emailed link before the account can log in —
     // registration doesn't sign the user in immediately.
-    const { message } = await authApi.register(email, password);
+    const { message } = await authApi.register(email, password, turnstileToken);
     return message;
   }, []);
 

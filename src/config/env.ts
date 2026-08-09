@@ -8,6 +8,9 @@ const envSchema = z.object({
   // present, since it avoids a same-host NAT hairpin round trip.
   REDIS_URL_INTERNAL: z.string().min(1).optional(),
   SESSION_ENCRYPTION_KEY: z.string().min(1),
+  // Cloudflare Turnstile secret for the "talonr-register" widget — verified server-side in
+  // auth.controller.ts#register before a signup ever reaches Deploro. See src/lib/turnstile.ts.
+  TURNSTILE_SECRET: z.string().min(1),
   // Deploro's platform Worker, which hosts the Auth-as-a-Service routes (/auth/:slug/*) used
   // in place of locally-signed JWTs. See src/modules/auth/deploro-auth.client.ts.
   DEPLORO_AUTH_BASE_URL: z.string().min(1),

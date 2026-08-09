@@ -177,8 +177,24 @@ directly from Talonr's deployed frontend).
   best-effort) and `startDisposableEmailBlocklistRefresh()` re-runs it every 24h in the background
   (`setInterval(...).unref()`, never blocks a request). `isDisposableEmail` itself stays pure/
   synchronous — no I/O on the request path, no network dependency in tests. Still
-  fundamentally a blocklist, so it only catches domains someone has already reported — scoped to
-  registration only, not login/reset, so accounts that predate this check keep working.
+  fundamentally a blocklist, so it only catches domains someone has already reported — a genuinely
+  brand-new rotating domain (`careney.com`) got through even this live-refreshed version, checked
+  against six independent sources, none of which had ever seen it. Scoped to registration only,
+  not login/reset, so accounts that predate this check keep working.
+  `register` also requires and verifies a Cloudflare Turnstile token
+  (`turnstileToken` in the request body, `src/lib/turnstile.ts#verifyTurnstileToken`, canonical
+  server-side `siteverify` call against `TURNSTILE_SECRET`) before either the disposable-email
+  check or the Deploro signup call runs — this doesn't detect disposable domains itself, it raises
+  the cost of *automated/scripted* mass signups, which is the realistic threat a domain-blocklist
+  alone can't stop. Sitekey `0x4AAAAAAEK07r3BDXghCSWt` (widget name `talonr-register` in the
+  Cloudflare dashboard, registered for `localhost`/`127.0.0.1`/`talonr.deploro.app`) is public and
+  lives in `frontend/src/lib/config.ts`; the secret is server-only, `TURNSTILE_SECRET` env var,
+  never sent to the frontend. Widget renders only on the Register tab of the shared
+  `frontend/src/pages/LoginRegister.tsx` login/register form
+  (`frontend/src/components/TurnstileWidget.tsx`, explicit JS-API render since the form is a
+  controlled React submit, not a native form post) — login stays ungated since it doesn't create
+  anything. Tokens are single-use, so a failed submit (validation error or a rejected `siteverify`)
+  resets the widget for a fresh challenge before the next attempt.
 - `POST /api/auth/login` → calls Deploro's `email-password/login`, gets back a Deploro session
   token, sets it as the httpOnly `talonr_token` cookie, and also returns it in the response body as
   `{ user, token }` for non-browser API consumers (also accepted via `Authorization: Bearer
@@ -280,7 +296,7 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | GET | /health | public | DB + Redis liveness check |
-| POST | /auth/register | public | Create user via Deploro Auth (email confirmation required before login) |
+| POST | /auth/register | public | Create user via Deploro Auth (`turnstileToken` required + verified, disposable-email domains rejected, email confirmation required before login) |
 | POST | /auth/login | public | Verify credentials via Deploro Auth, sets httpOnly cookie + returns Bearer token |
 | POST | /auth/request-password-reset | public | Email a Deploro Auth password-reset link (anti-enumeration: always the same response) |
 | POST | /auth/reset-password | public | Consume a reset token, set a new password via Deploro Auth |
@@ -331,7 +347,8 @@ CLI, not tracked as generated files in this repo.
 `REDIS_URL`, `REDIS_URL_INTERNAL` (optional — internal Docker-network Redis connection string,
 preferred over `REDIS_URL` when the VPS's compute stack and its Redis container share a network,
 avoiding a same-host NAT hairpin round trip), `SESSION_ENCRYPTION_KEY` (32 bytes, base64 —
-`openssl rand -base64 32`),
+`openssl rand -base64 32`), `TURNSTILE_SECRET` (Cloudflare Turnstile secret for the
+`talonr-register` widget — registration only, see "Auth" above),
 `DEPLORO_AUTH_BASE_URL` (Deploro's platform Worker, hosting the Auth-as-a-Service routes),
 `DEPLORO_PROJECT_SLUG` (default `talonr`), `DEPLORO_STUDIO_API_URL` (Talonr's Studio DB REST base,
 `{DEPLORO_AUTH_BASE_URL}/api/projects/{id}/studio`), `DEPLORO_STUDIO_API_TOKEN` (a project-scoped
