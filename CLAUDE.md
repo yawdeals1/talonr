@@ -1,7 +1,8 @@
 # Talonr — Implementation Spec
 
 Talonr is a multi-user lead scraper for X (Twitter). Each user connects and owns their own X
-account(s); scrapes (search / followers / likers) run through a job queue against a saved,
+account(s); scrapes (search / followers / engagers — repliers or retweeters of a tweet) run
+through a job queue against a saved,
 authenticated X session; every scrape writes leads to Postgres completely **unfiltered**; saved
 "lead lists" apply filters (bio keywords, follower range, location, verified-only) against
 already-scraped data **at read time**, so one scrape serves unlimited filter iterations. Admins get
@@ -37,6 +38,11 @@ root `dist/`, served by the same Worker deploy.
 - AES-256-GCM (Node's built-in `node:crypto`) for encrypting stored X session cookies and proxy
   credentials
 - zod for request validation, pino for logging
+- vitest for unit tests — service-layer ownership-isolation checks (accounts/scrapes/leads/
+  lead-lists each mock `studio-client.ts` and assert a user requesting another user's row gets
+  `NotFoundError` before any read/write/delete call), plus `rate-limit.ts`/`connect-token.ts`/
+  `disposable-email.ts` coverage. `vitest.config.ts` stubs `config/env.ts`'s required vars so
+  service modules import without real credentials.
 
 Two separate runtime entrypoints — `src/server.ts` (HTTP API) and `src/worker.ts` (BullMQ worker)
 — run as separate processes. Playwright workloads are heavy and shouldn't share an event loop with
@@ -76,8 +82,12 @@ src/
 │   ├── scroll-collector.ts           # shared scroll-and-collect engine (dedupe, cap, random delay)
 │   ├── detectors.ts                  # checkHealth(): captcha / login-challenge / rate-limit detection
 │   ├── parsers/user-cell.parser.ts   # shared DOM extractor (X reuses UserCell across all 3 views)
-│   └── sources/{search,followers,likers}.source.ts   # per-source buildUrl/waitForReady
-├── lib/{crypto.ts, logger.ts, errors.ts, async-handler.ts}
+│   └── sources/{search,followers,repliers,retweeters}.source.ts   # per-source buildUrl/waitForReady;
+│                                        "likers" retired (X made "who liked" private platform-wide,
+│                                        June 2024) — repliers/retweeters are the two strategies under
+│                                        the "engagers" sourceType that replaced it
+├── lib/{crypto.ts, logger.ts, errors.ts, async-handler.ts, rate-limit.ts, connect-token.ts,
+│        disposable-email.ts}
 ├── app.ts                            # express app: helmet, cors, cookie-parser, routes, error handler
 ├── server.ts                         # HTTP entrypoint
 └── worker.ts                         # BullMQ worker entrypoint
@@ -118,8 +128,13 @@ against a large multi-tenant dataset.
   `active`|`checkpointed`|`banned`, default `active`), daily_scrape_limit (int, default 150),
   max_concurrency (int, default 1), last_used_at, created_at. Unique on (user_id, handle).
 - **scrape_jobs**: id, user_id (FK), x_account_id (FK), source_type (enum
-  `search`|`followers`|`likers`), source_ref (text — keyword / target handle / tweet URL), status
-  (enum `queued`|`running`|`completed`|`failed`|`paused`), leads_found (int), error_message
+  `search`|`followers`|`likers`|`engagers` — `likers` is legacy-only: X made "who liked a post"
+  private platform-wide in June 2024 with no workaround, so `scrapes.controller.ts#createSchema`
+  no longer accepts it for new jobs, kept solely so historical rows still typecheck), source_ref
+  (text — keyword / target handle / tweet URL), engagement_types (jsonb array of
+  `repliers`|`retweeters`, nullable — only set/meaningful when source_type is `engagers`, selects
+  which of the two engagement-scraping strategies to run), status (enum
+  `queued`|`running`|`completed`|`failed`|`paused`), leads_found (int), error_message
   (nullable), started_at, finished_at, created_at
 - **leads**: id, user_id (FK), handle, display_name, bio, followers (nullable int — see caveat
   below), location, verified (bool), profile_image, source_type, source_ref, first_seen_at,
@@ -128,11 +143,12 @@ against a large multi-tenant dataset.
   so re-scraping refreshes fields + `last_seen_at` without touching `first_seen_at`.
 - **lead_lists**: id, user_id (FK), name, filter_definition (jsonb:
   `{bioKeywords?: string[], minFollowers?: number, maxFollowers?: number, location?: string,
-  verifiedOnly?: boolean}`), created_at
+  verifiedOnly?: boolean, maxLeads?: number}` — `maxLeads` caps the total matched leads a list
+  evaluation returns across all pages, not a per-page size), created_at
 - **activity_log**: id, user_id (FK), action (varchar), metadata (jsonb), created_at — powers the
   admin activity feed via `logActivity(userId, action, metadata)`
 
-**Caveat**: X's list-view cells (search/followers/likers) don't expose follower count without
+**Caveat**: X's list-view cells (search/followers/repliers/retweeters) don't expose follower count without
 visiting the profile page, so `leads.followers` is frequently `NULL` from scraping alone.
 `filter-query-builder.ts` excludes NULL-follower rows from min/max-follower filters rather than
 erroring. A profile-visit enrichment pass would multiply request volume against X and is
@@ -149,7 +165,12 @@ directly from Talonr's deployed frontend).
 
 - `POST /api/auth/register` → calls Deploro's `email-password/signup`, returns `202 { message }`.
   Deploro requires the user to click an emailed confirmation link before they can log in — there is
-  no instant-registration path, by Deploro's design.
+  no instant-registration path, by Deploro's design. `registerSchema`
+  (`auth.controller.ts`) also rejects disposable/temporary email domains before the request ever
+  reaches Deploro, via `isDisposableEmail` (`src/lib/disposable-email.ts`), checked against the
+  `disposable-email-domains` npm package's exact + wildcard-suffix domain lists (~121k entries,
+  community-maintained). Blocklist-based, so it only catches domains the list already knows about —
+  scoped to registration only, not login/reset, so accounts that predate this check keep working.
 - `POST /api/auth/login` → calls Deploro's `email-password/login`, gets back a Deploro session
   token, sets it as the httpOnly `talonr_token` cookie, and also returns it in the response body as
   `{ user, token }` for non-browser API consumers (also accepted via `Authorization: Bearer
@@ -160,14 +181,26 @@ directly from Talonr's deployed frontend).
   /auth/{slug}/session` on every request (`auth.service.ts#validateAndSyncUser`), auto-provisioning
   a local `users` row on first sight of a given `deploro_account_id` — that local row is the FK
   anchor everywhere else (`x_accounts`, `scrape_jobs`, `leads`, `lead_lists`, `activity_log`) and
-  the only place `role` lives. A short in-memory TTL cache (~60s, in `auth.middleware.ts`) sits in
-  front of that Deploro round trip so it isn't on the hot path for every request. `requireAdmin`
-  checks `req.user.role === 'admin'` exactly as before — **promoting a user to admin is still a
-  manual DB action**: `UPDATE users SET role = 'admin' WHERE email = '...'`.
+  the only place `role` lives. A short in-memory TTL cache (~10s, in `auth.middleware.ts`) sits in
+  front of that Deploro round trip so it isn't on the hot path for every request — short enough
+  that a revoked session or role change (e.g. banning a user) takes effect quickly rather than up
+  to a minute later. `requireAdmin` checks `req.user.role === 'admin'` exactly as before —
+  **promoting a user to admin is still a manual DB action**: `UPDATE users SET role = 'admin'
+  WHERE email = '...'`.
 - `POST /api/auth/logout` → best-effort revokes the Deploro session
   (`deploro-auth.client.ts#revokeSession`) before clearing the local cookie.
-- One route, `POST /api/accounts/session`, deliberately doesn't use any of the above — see "Login
-  flow" below for why and how it's still authenticated.
+- Every auth route is Redis rate-limited (`src/lib/rate-limit.ts`, same atomic INCR+EXPIRE Lua
+  pattern as `daily-quota.ts`): IP-based on all four, plus email-keyed limiting on login/reset —
+  Talonr forwards every attempt to Deploro Auth, so without a limiter here credential
+  stuffing/brute force costs real outbound requests regardless of Deploro's own protection.
+  `POST /scrapes` has a separate user-keyed limiter for the same reason (nothing otherwise stops
+  flooding `scrape_jobs` inserts that all instantly no-op past the per-account daily-quota check).
+- `app.ts` also applies a default-deny gate ahead of the individual routers: every path under
+  `/api/` requires auth unless it's explicitly listed as public (`/api/health`,
+  `/api/auth/register|login|request-password-reset|reset-password`, plus `/api/accounts/session`
+  and `/api/accounts/login-script` — see "Login flow" below for why those two are listed despite
+  not actually being open). Each router still calls `requireAuth` itself too — the gate is a
+  backstop against a future router forgetting to, not a replacement for the per-router check.
 
 ## Session & proxy encryption (`src/lib/crypto.ts`, `src/scraper/session-store.ts`)
 
@@ -203,21 +236,33 @@ marked `paused` (terminal for the day, no retry storm). Real errors (network bli
 exceptions) use BullMQ's normal `attempts: 3` + exponential backoff (set in `queues.ts`'s
 `defaultJobOptions`). Captcha/login-challenge/rate-limit detection during a run
 (`isAccountHealthError`) sets the account to `checkpointed` and marks the job `paused` — terminal,
-no retry — per the safety requirement.
+no retry — per the safety requirement. A `checkpointed`/`banned` account can't be flipped straight
+back to `active` through `PATCH /accounts/:id` (`accounts.service.ts#updateAccount`) — that would
+let a user silently bypass the safety trip; resuming requires re-running the login script.
 
 ## Scraper modules (`src/scraper/`)
 
 Shared `ScrapeSource` interface (`buildUrl`, `waitForReady`, `extractVisibleItems`) implemented by
-`sources/{search,followers,likers}.source.ts`, all sharing `parsers/user-cell.parser.ts` since X
-reuses the same `[data-testid="UserCell"]` component across search results, followers lists, and
-likers lists. `scroll-collector.ts#scrollAndCollect` drives the run: `goto` → `checkHealth` →
-`waitForReady` → loop until `capLeads` reached or 4 consecutive stagnant scroll rounds → each
-round: `checkHealth`, `extractVisibleItems`, dedupe into an in-memory `Map` keyed by lowercased
-handle, `page.mouse.wheel` scroll, random delay from `SCROLL_DELAY_MIN_MS`/`SCROLL_DELAY_MAX_MS`.
-`detectors.ts#checkHealth` checks URL patterns (login/challenge/lockdown redirects), a captcha
-iframe selector, and rate-limit text on the page; `watchForRateLimitResponses` also listens for
-HTTP 429s. Source `sourceRef` semantics: `search` = raw keyword/query string, `followers` = target
-handle (without `@`), `likers` = full tweet URL (`/likes` is appended if missing).
+`sources/{search,followers,repliers,retweeters}.source.ts`, all sharing
+`parsers/user-cell.parser.ts` since X reuses the same `[data-testid="UserCell"]` component across
+search results, followers lists, and a tweet's reply/retweet lists. `repliers`/`retweeters`
+together are the `engagers` sourceType (`scrape_jobs.engagement_types` picks which run) — they
+replaced `likers` after X made "who liked a post" private platform-wide in June 2024 with no
+workaround; `likers` stays a legal `SourceType`/enum value only so historical `scrape_jobs`/`leads`
+rows still typecheck, and is rejected at job-creation time for new jobs
+(`scrapes.controller.ts#createSchema`). `scroll-collector.ts#scrollAndCollect` drives the run:
+`goto` → `checkHealth` → `waitForReady` → loop until `capLeads` reached or 4 consecutive stagnant
+scroll rounds → each round: `checkHealth`, `extractVisibleItems`, dedupe into an in-memory `Map`
+keyed by lowercased handle, `page.mouse.wheel` scroll, random delay from
+`SCROLL_DELAY_MIN_MS`/`SCROLL_DELAY_MAX_MS`. `detectors.ts#checkHealth` checks URL patterns
+(login/challenge/lockdown redirects), a captcha iframe selector, and rate-limit text on the page;
+`watchForRateLimitResponses` also listens for HTTP 429s. Source `sourceRef` semantics: `search` =
+raw keyword/query string, `followers` = target handle (without `@`), `engagers` = full tweet URL.
+`sourceRef` is validated against an X handle/tweet-URL shape (`scraper/types.ts`'s
+`X_HANDLE_PATTERN`/`X_TWEET_URL_PATTERN`) both at job-creation time and again inside
+`followers.source.ts`/`repliers.source.ts`/`retweeters.source.ts` — `buildUrl` feeds
+`page.goto()` directly inside the worker's authenticated Playwright session, so an unvalidated
+value there would let a user point the browser at an arbitrary URL (SSRF).
 
 ## REST API
 
@@ -241,7 +286,7 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 | POST | /accounts/session | connect token | `scripts/login.ts` posts a captured `storageState`/proxy back here, authenticated by the connect token instead of a Deploro session — listed in `app.ts`'s `PUBLIC_API_PATHS` for that reason, not because it's actually open |
 | PATCH | /accounts/:id | auth | Update dailyScrapeLimit / maxConcurrency / status |
 | DELETE | /accounts/:id | auth | Delete own account (cascades scrape_jobs) |
-| POST | /scrapes | auth | Create a scrape_jobs row + enqueue BullMQ job (`xAccountId`, `sourceType`, `sourceRef`, `capLeads?`) |
+| POST | /scrapes | auth | Create a scrape_jobs row + enqueue BullMQ job (`xAccountId`, `sourceType`: `search`\|`followers`\|`engagers`, `sourceRef`, `engagementTypes?` required for `engagers`, `capLeads?`) — rate-limited per user |
 | GET | /scrapes | auth | List own jobs, filterable by `status`/`xAccountId` |
 | GET | /scrapes/:id | auth | Job detail/status |
 | POST | /scrapes/:id/cancel | auth | Removes from queue if still waiting/delayed; best-effort if already running |
@@ -266,6 +311,7 @@ build / start / start:worker   # tsc build then run compiled dist/
 login:x                    # scripts/login.ts — interactive X session capture (operator convenience wrapper;
                               # the script itself is a standalone file any account owner can run — see "Login flow")
 typecheck / lint          # tsc --noEmit / eslint .
+test                        # vitest run — service-layer ownership isolation + lib unit tests
 ```
 
 Schema changes are **not** an npm script — they're `deploro migrate create --up-file ... --down-file
@@ -274,7 +320,10 @@ CLI, not tracked as generated files in this repo.
 
 ## Env vars (see `.env.example`)
 
-`REDIS_URL`, `SESSION_ENCRYPTION_KEY` (32 bytes, base64 — `openssl rand -base64 32`),
+`REDIS_URL`, `REDIS_URL_INTERNAL` (optional — internal Docker-network Redis connection string,
+preferred over `REDIS_URL` when the VPS's compute stack and its Redis container share a network,
+avoiding a same-host NAT hairpin round trip), `SESSION_ENCRYPTION_KEY` (32 bytes, base64 —
+`openssl rand -base64 32`),
 `DEPLORO_AUTH_BASE_URL` (Deploro's platform Worker, hosting the Auth-as-a-Service routes),
 `DEPLORO_PROJECT_SLUG` (default `talonr`), `DEPLORO_STUDIO_API_URL` (Talonr's Studio DB REST base,
 `{DEPLORO_AUTH_BASE_URL}/api/projects/{id}/studio`), `DEPLORO_STUDIO_API_TOKEN` (a project-scoped
@@ -337,7 +386,24 @@ wrapper around the same file.
 - Studio DB constraints (see "Data model" above) mean lead-list filtering and the leads
   handle-search run in-process over a capped fetch rather than in SQL, and `upsertLeads` is N
   bounded-concurrency REST calls instead of one bulk statement — both fine at this project's scale,
-  neither would scale to a large multi-tenant dataset.
+  neither would scale to a large multi-tenant dataset. Same reason there's no database-level
+  tenant isolation (no RLS-equivalent on the Studio DB) — every ownership check ("fetch a row I
+  own") is enforced only in the Express service layer (`findOwnedOrThrow`-style patterns), with no
+  DB-level backstop. The compensating control is test coverage, not a code fix: each of
+  accounts/scrapes/leads/lead-lists has a vitest suite mocking `studio-client.ts` and asserting a
+  cross-user fetch/update/delete gets `NotFoundError` before the underlying call ever runs, so a
+  regression in one of those checks fails CI instead of shipping silently.
 - The VPS Postgres container this app used before the Studio DB migration is still provisioned and
   running, unused, on the shared VPS — the `deploro` CLI has no delete/teardown route for VPS
   Postgres or Redis specifically, only `vps deploy` for the compute stack as a whole.
+- The deployed frontend's Cloudflare Worker (`worker.js`, proxies `/backend/*` to the VPS-hosted
+  API — see its own comments for the `/api`-reservation and raw-IP-literal workarounds this needed)
+  forwards to the VPS over plain `http://`, not `https://` — the VPS is shared across multiple
+  Deploro projects and its ports 80/443 already belong to the platform's own nginx, so a
+  per-project TLS-terminating reverse proxy (e.g. Caddy) can't bind the ports ACME validation
+  needs. A prior attempt at this (2026-08-07) failed with "address already in use" on :80 and
+  briefly broke the public route to the API until reverted. Every request this Worker forwards,
+  including login/register bodies and Bearer tokens, crosses the public internet unencrypted until
+  this gets a real fix: either an owned domain with a DNS-01 challenge (no inbound port required),
+  or a routing rule on the platform's shared nginx forwarding ACME HTTP-01 challenges through to
+  this project's container — neither is achievable from this repo alone.
