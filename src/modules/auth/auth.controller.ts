@@ -2,6 +2,7 @@ import type { Response } from "express";
 import { z } from "zod";
 import { env } from "../../config/env.js";
 import { NotFoundError, ValidationError } from "../../lib/errors.js";
+import { isDisposableEmail } from "../../lib/disposable-email.js";
 import * as deploroAuth from "./deploro-auth.client.js";
 import type { AuthedRequest } from "./auth.middleware.js";
 import { getUserById, loginUser, registerUser, requestPasswordReset as requestPasswordResetService, resetPassword as resetPasswordService } from "./auth.service.js";
@@ -24,7 +25,12 @@ const passwordCriteriaSchema = z
   .regex(/[0-9]/, "Password must include a number");
 
 const registerSchema = z.object({
-  email: z.string().email(),
+  email: z
+    .string()
+    .email()
+    .refine((email) => !isDisposableEmail(email), {
+      message: "Disposable or temporary email addresses are not allowed. Please use a permanent email address.",
+    }),
   password: passwordCriteriaSchema,
 });
 
