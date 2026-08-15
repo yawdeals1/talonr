@@ -7,6 +7,7 @@ import type { RawLead } from "../../scraper/types.js";
 export interface ListLeadsOptions {
   handle?: string;
   sourceType?: SourceType;
+  sourceRef?: string;
   page?: number;
   pageSize?: number;
 }
@@ -55,12 +56,19 @@ export async function listLeads(userId: string, options: ListLeadsOptions) {
   const page = options.page ?? 1;
   const pageSize = Math.min(options.pageSize ?? 50, 200);
 
-  // sourceType pushes down as an equality filter; handle is a substring search, which the Studio
-  // API can't do server-side (no ORDER BY either) — fetch the (already-narrowed) set and
+  // sourceType/sourceRef push down as equality filters; handle is a substring search, which the
+  // Studio API can't do server-side (no ORDER BY either) — fetch the (already-narrowed) set and
   // filter/sort/paginate in-process.
   const all = await studioListSorted<Lead>(
     "leads",
-    { filter: { userId, ...(options.sourceType ? { sourceType: options.sourceType } : {}) }, cap: 5000 },
+    {
+      filter: {
+        userId,
+        ...(options.sourceType ? { sourceType: options.sourceType } : {}),
+        ...(options.sourceRef ? { sourceRef: options.sourceRef } : {}),
+      },
+      cap: 5000,
+    },
     (a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt)
   );
 

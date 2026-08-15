@@ -4,6 +4,7 @@ import type { Lead, SourceType } from "./types";
 export interface ListLeadsFilters {
   handle?: string;
   sourceType?: SourceType;
+  sourceRef?: string;
   page?: number;
   pageSize?: number;
 }

@@ -150,6 +150,10 @@ export function LeadListForm() {
             placeholder="Substring match, e.g. London"
             className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
           />
+          <p className="mt-1 text-xs text-zinc-500">
+            X doesn't expose location on search/followers/engager result cards, so this field is
+            never populated by scraping today — a location filter here won't match any leads yet.
+          </p>
         </div>
 
         <label className="flex items-center gap-2 text-sm">

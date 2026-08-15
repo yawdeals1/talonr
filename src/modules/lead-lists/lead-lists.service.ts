@@ -43,15 +43,15 @@ export async function evaluateLeadList(userId: string, id: string, page = 1, pag
   const size = Math.min(pageSize, 200);
   const predicate = buildFilterPredicate(list.filterDefinition);
 
-  // verifiedOnly pushes down as an equality filter to shrink the fetched set; everything else in
-  // the predicate (bio keywords, follower range, location) has to run in-process — see
-  // filter-query-builder.ts.
+  // Every predicate field, including verifiedOnly, runs in-process via buildFilterPredicate.
+  // verifiedOnly used to push down as a server-side `filter[verified]=true` equality filter, but
+  // that was the only boolean-typed filter anywhere in the codebase (every other Studio DB filter
+  // in this app is a string/uuid) and went through studio-client.ts's `String(value)` query-param
+  // coercion untested — a likely source of silently-empty lead lists whenever "verified only" was
+  // checked. Fetching everything for the user and filtering here is provably correct instead.
   const candidates = await studioListSorted<Lead>(
     "leads",
-    {
-      filter: { userId, ...(list.filterDefinition.verifiedOnly ? { verified: true } : {}) },
-      cap: 5000,
-    },
+    { filter: { userId }, cap: 5000 },
     (a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt)
   );
 

@@ -9,6 +9,9 @@ const listQuerySchema = z.object({
   // "likers" stays filterable so historical leads scraped before X locked down likes visibility
   // (June 2024) are still browsable — new leads can no longer be scraped with that source type.
   sourceType: z.enum(["search", "followers", "likers", "engagers"]).optional(),
+  // Lets a scrape job's detail page show the leads currently on file for that job's target
+  // (sourceType + sourceRef) — see scrapes.controller.ts's job detail route.
+  sourceRef: z.string().optional(),
   page: z.coerce.number().int().positive().optional(),
   pageSize: z.coerce.number().int().positive().optional(),
 });
