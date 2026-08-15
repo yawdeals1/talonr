@@ -1,6 +1,8 @@
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
+import fs from "node:fs";
+import path from "node:path";
 import helmet from "helmet";
 import { env } from "./config/env.js";
 import { studioList } from "./db/studio-client.js";
@@ -75,5 +77,22 @@ app.use("/api/scrapes", scrapesRouter);
 app.use("/api/leads", leadsRouter);
 app.use("/api/lead-lists", leadListsRouter);
 app.use("/api/admin", adminRouter);
+
+// Serves the built frontend when this process is the one a domain routes to directly — the VPS
+// compute deploy publishes an HTTP port (docker-compose.yml's `api` service), which the platform
+// then points talonr.deploro.app's DNS at directly, bypassing the Cloudflare Worker that normally
+// serves the frontend. Guarded by an existence check since local dev runs the frontend separately
+// via Vite and never has frontend/dist built.
+const FRONTEND_DIST = path.join(process.cwd(), "frontend", "dist");
+if (fs.existsSync(FRONTEND_DIST)) {
+  app.use(express.static(FRONTEND_DIST));
+  app.use((req, res, next) => {
+    if (req.method !== "GET" || req.path.startsWith("/api/")) {
+      next();
+      return;
+    }
+    res.sendFile(path.join(FRONTEND_DIST, "index.html"));
+  });
+}
 
 app.use(errorHandler);
