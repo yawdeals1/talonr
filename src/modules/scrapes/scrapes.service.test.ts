@@ -10,6 +10,7 @@ import { cancelScrapeJob, createScrapeJob, getScrapeJob } from "./scrapes.servic
 
 const studioGet = vi.fn();
 const studioInsert = vi.fn();
+const studioTableHasColumn = vi.fn();
 const studioUpdate = vi.fn();
 const queueAdd = vi.fn();
 const queueGetJob = vi.fn();
@@ -18,6 +19,7 @@ vi.mock("../../db/studio-client.js", () => ({
   studioGet: (...args: unknown[]) => studioGet(...args),
   studioListSorted: vi.fn(),
   studioInsert: (...args: unknown[]) => studioInsert(...args),
+  studioTableHasColumn: (...args: unknown[]) => studioTableHasColumn(...args),
   studioUpdate: (...args: unknown[]) => studioUpdate(...args),
 }));
 
@@ -62,6 +64,7 @@ const ownedJob: ScrapeJob = {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  studioTableHasColumn.mockResolvedValue(false);
 });
 
 describe("scrapes.service ownership isolation", () => {
@@ -83,6 +86,69 @@ describe("scrapes.service ownership isolation", () => {
       sourceRef: "keyword",
     });
     expect(result.id).toBe(JOB_ID);
+    expect(studioInsert).toHaveBeenCalledWith("scrape_jobs", {
+      userId: OWNER,
+      xAccountId: ACCOUNT_ID,
+      sourceType: "search",
+      sourceRef: "keyword",
+      status: "queued",
+    });
+    expect(queueAdd).toHaveBeenCalledTimes(1);
+  });
+
+  it("createScrapeJob: queues engagement strategies when the optional Studio column is absent", async () => {
+    studioGet.mockResolvedValue(ownedAccount);
+    studioInsert.mockResolvedValue({ ...ownedJob, sourceType: "engagers" });
+
+    await createScrapeJob(OWNER, {
+      xAccountId: ACCOUNT_ID,
+      sourceType: "engagers",
+      sourceRef: "https://x.com/example/status/123",
+      engagementTypes: ["retweeters"],
+      capLeads: 15,
+    });
+
+    expect(studioInsert).toHaveBeenCalledWith(
+      "scrape_jobs",
+      expect.not.objectContaining({ engagementTypes: expect.anything() })
+    );
+    expect(queueAdd).toHaveBeenCalledWith(
+      "scrape",
+      expect.objectContaining({ engagementTypes: ["retweeters"], capLeads: 15 }),
+      expect.any(Object)
+    );
+  });
+
+  it("createScrapeJob: persists engagement strategies when the Studio column is available", async () => {
+    studioGet.mockResolvedValue(ownedAccount);
+    studioTableHasColumn.mockResolvedValue(true);
+    studioInsert.mockResolvedValue({ ...ownedJob, sourceType: "engagers", engagementTypes: ["retweeters"] });
+
+    await createScrapeJob(OWNER, {
+      xAccountId: ACCOUNT_ID,
+      sourceType: "engagers",
+      sourceRef: "https://x.com/example/status/123",
+      engagementTypes: ["retweeters"],
+    });
+
+    expect(studioInsert).toHaveBeenCalledWith(
+      "scrape_jobs",
+      expect.objectContaining({ engagementTypes: ["retweeters"] })
+    );
+  });
+
+  it("createScrapeJob: still creates the job when the optional schema lookup fails", async () => {
+    studioGet.mockResolvedValue(ownedAccount);
+    studioTableHasColumn.mockRejectedValue(new Error("spec unavailable"));
+    studioInsert.mockResolvedValue(ownedJob);
+
+    await createScrapeJob(OWNER, {
+      xAccountId: ACCOUNT_ID,
+      sourceType: "search",
+      sourceRef: "keyword",
+    });
+
+    expect(studioInsert).toHaveBeenCalledTimes(1);
     expect(queueAdd).toHaveBeenCalledTimes(1);
   });
 

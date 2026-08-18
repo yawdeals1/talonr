@@ -4,6 +4,15 @@ import { AppError } from "../lib/errors.js";
 const BASE = env.DEPLORO_STUDIO_API_URL;
 const TOKEN = env.DEPLORO_STUDIO_API_TOKEN;
 
+interface StudioSpec {
+  components?: {
+    schemas?: Record<string, { properties?: Record<string, unknown> }>;
+  };
+}
+
+let specCache: { value: StudioSpec; expiresAt: number } | null = null;
+let specRequest: Promise<StudioSpec> | null = null;
+
 type FilterValue = string | number | boolean;
 
 function authHeaders(): HeadersInit {
@@ -54,6 +63,38 @@ function serializeValues(values: Record<string, unknown>): Record<string, unknow
     else out[key] = value;
   }
   return out;
+}
+
+async function studioSpec(): Promise<StudioSpec> {
+  const now = Date.now();
+  if (specCache && specCache.expiresAt > now) return specCache.value;
+
+  if (!specRequest) {
+    specRequest = (async () => {
+      const res = await fetch(`${BASE}/spec`, { headers: authHeaders() });
+      if (!res.ok) {
+        const data = await parseJson(res);
+        throw new AppError(errorMessage(data, "Studio schema lookup failed"), res.status);
+      }
+      const value = (await res.json()) as StudioSpec;
+      specCache = { value, expiresAt: Date.now() + 60_000 };
+      return value;
+    })().finally(() => {
+      specRequest = null;
+    });
+  }
+
+  return specRequest;
+}
+
+/**
+ * Studio generates an OpenAPI schema from the live database. Checking it before using a recently
+ * added optional column lets rolling deployments remain compatible while the matching database
+ * migration is being applied. The short cache avoids putting a schema request on every insert.
+ */
+export async function studioTableHasColumn(table: string, column: string): Promise<boolean> {
+  const spec = await studioSpec();
+  return Object.prototype.hasOwnProperty.call(spec.components?.schemas?.[table]?.properties ?? {}, column);
 }
 
 export async function studioList<T>(
