@@ -19,7 +19,17 @@ import { scrapesRouter } from "./modules/scrapes/scrapes.routes.js";
 
 export const app = express();
 
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        // Lead avatars are stored as X's public pbs.twimg.com URLs. Keep external images
+        // default-denied while allowing that single CDN alongside local/data images.
+        imgSrc: ["'self'", "data:", "https://pbs.twimg.com"],
+      },
+    },
+  })
+);
 app.use(cors({ origin: env.ALLOWED_ORIGIN, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
