@@ -18,3 +18,7 @@ export function listLeads(
 export function getLead(id: string): Promise<{ lead: Lead }> {
   return apiFetch(`/leads/${id}`);
 }
+
+export function deleteLead(id: string): Promise<void> {
+  return apiFetch(`/leads/${id}`, { method: "DELETE" });
+}

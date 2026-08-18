@@ -321,6 +321,7 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 | DELETE | /scrapes/:id | auth | Deletes a non-running scrape record/queue entry; collected leads remain saved |
 | GET | /leads | auth | Paginated own leads, filterable by `handle`/`sourceType` |
 | GET | /leads/:id | auth | Lead detail |
+| DELETE | /leads/:id | auth | Permanently delete one owned lead; saved lead-list results update automatically |
 | GET | /lead-lists | auth | List own saved filters |
 | POST | /lead-lists | auth | Create `{name, filterDefinition}` |
 | GET | /lead-lists/:id | auth | Get filter definition |

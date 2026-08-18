@@ -9,7 +9,15 @@ function VerifiedBadge() {
   );
 }
 
-export function LeadsTable({ leads, onRowClick }: { leads: Lead[]; onRowClick: (lead: Lead) => void }) {
+export function LeadsTable({
+  leads,
+  onRowClick,
+  onDelete,
+}: {
+  leads: Lead[];
+  onRowClick: (lead: Lead) => void;
+  onDelete?: (lead: Lead) => void;
+}) {
   return (
     <div className="overflow-x-auto rounded-lg border">
       <table className="w-full text-sm">
@@ -22,6 +30,7 @@ export function LeadsTable({ leads, onRowClick }: { leads: Lead[]; onRowClick: (
             <th className="px-3 py-2 font-medium">Location</th>
             <th className="px-3 py-2 font-medium">Source</th>
             <th className="px-3 py-2 font-medium">Last seen</th>
+            {onDelete && <th className="px-3 py-2 text-right font-medium">Actions</th>}
           </tr>
         </thead>
         <tbody>
@@ -62,6 +71,17 @@ export function LeadsTable({ leads, onRowClick }: { leads: Lead[]; onRowClick: (
                 <span className="capitalize">{lead.sourceType}</span>
               </td>
               <td className="px-3 py-2 text-xs text-zinc-500">{formatRelative(lead.lastSeenAt)}</td>
+              {onDelete && (
+                <td className="px-3 py-2 text-right" onClick={(event) => event.stopPropagation()}>
+                  <button
+                    type="button"
+                    onClick={() => onDelete(lead)}
+                    className="rounded-md border px-2.5 py-1 text-xs font-medium text-status-danger hover:bg-status-danger-bg"
+                  >
+                    Delete
+                  </button>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

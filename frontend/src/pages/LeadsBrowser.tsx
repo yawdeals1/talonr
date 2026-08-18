@@ -1,8 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router";
-import { listLeads } from "../api/leads";
+import { deleteLead, listLeads } from "../api/leads";
 import type { Lead, SourceType } from "../api/types";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
 import { LeadDetailDrawer } from "../components/LeadDetailDrawer";
 import { LeadsTable } from "../components/LeadsTable";
@@ -13,10 +14,12 @@ const PAGE_SIZE = 50;
 const SOURCE_TYPES: SourceType[] = ["search", "followers", "likers", "engagers"];
 
 export function LeadsBrowser() {
+  const queryClient = useQueryClient();
   const [handle, setHandle] = useState("");
   const [sourceType, setSourceType] = useState<SourceType | "">("");
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Lead | null>(null);
+  const [deleting, setDeleting] = useState<Lead | null>(null);
 
   const query = useQuery({
     queryKey: ["leads", { handle, sourceType, page }],
@@ -26,6 +29,16 @@ export function LeadsBrowser() {
   const leads = query.data?.leads ?? [];
   const hasFilters = handle || sourceType;
   const noLeadsAtAll = !query.isLoading && leads.length === 0 && page === 1 && !hasFilters;
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteLead,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
+      setSelected(null);
+      setDeleting(null);
+      if (leads.length === 1 && page > 1) setPage((current) => current - 1);
+    },
+  });
 
   return (
     <div className="space-y-4">
@@ -79,7 +92,7 @@ export function LeadsBrowser() {
         <EmptyState title="No leads match these filters" />
       ) : (
         <>
-          <LeadsTable leads={leads} onRowClick={setSelected} />
+          <LeadsTable leads={leads} onRowClick={setSelected} onDelete={setDeleting} />
           <div className="flex items-center justify-between text-sm text-zinc-500">
             <span>Page {page}</span>
             <div className="flex gap-2">
@@ -104,7 +117,16 @@ export function LeadsBrowser() {
         </>
       )}
 
-      {selected && <LeadDetailDrawer lead={selected} onClose={() => setSelected(null)} />}
+      {selected && <LeadDetailDrawer lead={selected} onClose={() => setSelected(null)} onDelete={setDeleting} />}
+
+      {deleting && (
+        <ConfirmDialog
+          title="Delete lead?"
+          message={`This permanently removes @${deleting.handle} from your saved leads and lead lists. A future scrape may collect this account again.`}
+          onConfirm={() => deleteMutation.mutate(deleting.id)}
+          onCancel={() => setDeleting(null)}
+        />
+      )}
     </div>
   );
 }

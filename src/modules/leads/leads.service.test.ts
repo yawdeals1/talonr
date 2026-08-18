@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Lead } from "../../db/schema.js";
 import { NotFoundError } from "../../lib/errors.js";
-import { getLead } from "./leads.service.js";
+import { deleteLead, getLead } from "./leads.service.js";
 
 // Compensating control for the lack of database-level tenant isolation (see
 // accounts.service.test.ts for the full rationale) — this file covers leads.service.ts's own
@@ -11,6 +11,7 @@ const studioGet = vi.fn();
 const studioList = vi.fn();
 const studioInsert = vi.fn();
 const studioUpdate = vi.fn();
+const studioDelete = vi.fn();
 
 vi.mock("../../db/studio-client.js", () => ({
   studioGet: (...args: unknown[]) => studioGet(...args),
@@ -18,6 +19,7 @@ vi.mock("../../db/studio-client.js", () => ({
   studioListSorted: (...args: unknown[]) => studioList(...args),
   studioInsert: (...args: unknown[]) => studioInsert(...args),
   studioUpdate: (...args: unknown[]) => studioUpdate(...args),
+  studioDelete: (...args: unknown[]) => studioDelete(...args),
 }));
 
 const OWNER = "owner-user-id";
@@ -59,5 +61,17 @@ describe("leads.service ownership isolation", () => {
   it("getLead: a nonexistent id gets NotFoundError, not a crash", async () => {
     studioGet.mockResolvedValue(null);
     await expect(getLead(OWNER, "does-not-exist")).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("deleteLead: owner can delete their own lead", async () => {
+    studioGet.mockResolvedValue(ownedLead);
+    await deleteLead(OWNER, LEAD_ID);
+    expect(studioDelete).toHaveBeenCalledWith("leads", LEAD_ID);
+  });
+
+  it("deleteLead: a different user cannot delete someone else's lead", async () => {
+    studioGet.mockResolvedValue(ownedLead);
+    await expect(deleteLead(ATTACKER, LEAD_ID)).rejects.toBeInstanceOf(NotFoundError);
+    expect(studioDelete).not.toHaveBeenCalled();
   });
 });

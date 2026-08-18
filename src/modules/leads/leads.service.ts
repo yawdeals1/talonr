@@ -1,4 +1,4 @@
-import { studioGet, studioInsert, studioList, studioListSorted, studioUpdate } from "../../db/studio-client.js";
+import { studioDelete, studioGet, studioInsert, studioList, studioListSorted, studioUpdate } from "../../db/studio-client.js";
 import { normalizeStudioSourceType, toStudioSourceType } from "../../db/source-type-compat.js";
 import type { Lead, SourceType } from "../../db/schema.js";
 import { mapWithConcurrency } from "../../lib/concurrency.js";
@@ -88,4 +88,9 @@ export async function getLead(userId: string, leadId: string) {
   const lead = await studioGet<Lead>("leads", leadId);
   if (!lead || lead.userId !== userId) throw new NotFoundError("Lead not found");
   return normalizeStudioSourceType(lead);
+}
+
+export async function deleteLead(userId: string, leadId: string): Promise<void> {
+  await getLead(userId, leadId);
+  await studioDelete("leads", leadId);
 }

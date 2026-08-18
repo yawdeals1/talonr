@@ -2,7 +2,7 @@ import type { Response } from "express";
 import { z } from "zod";
 import { ValidationError } from "../../lib/errors.js";
 import type { AuthedRequest } from "../auth/auth.middleware.js";
-import { getLead, listLeads } from "./leads.service.js";
+import { deleteLead, getLead, listLeads } from "./leads.service.js";
 
 const listQuerySchema = z.object({
   handle: z.string().optional(),
@@ -24,4 +24,9 @@ export async function list(req: AuthedRequest, res: Response) {
 
 export async function get(req: AuthedRequest, res: Response) {
   res.json({ lead: await getLead(req.user!.id, req.params.id) });
+}
+
+export async function remove(req: AuthedRequest, res: Response) {
+  await deleteLead(req.user!.id, req.params.id);
+  res.status(204).send();
 }

@@ -2,7 +2,15 @@ import type { Lead } from "../api/types";
 import { useDialogA11y } from "../lib/useDialogA11y";
 import { formatDateTime, formatNumber } from "../lib/format";
 
-export function LeadDetailDrawer({ lead, onClose }: { lead: Lead; onClose: () => void }) {
+export function LeadDetailDrawer({
+  lead,
+  onClose,
+  onDelete,
+}: {
+  lead: Lead;
+  onClose: () => void;
+  onDelete?: (lead: Lead) => void;
+}) {
   const { titleId, panelRef } = useDialogA11y(onClose);
 
   return (
@@ -80,6 +88,16 @@ export function LeadDetailDrawer({ lead, onClose }: { lead: Lead; onClose: () =>
             <dd className="mt-0.5 font-mono text-xs">{formatDateTime(lead.lastSeenAt)}</dd>
           </div>
         </dl>
+
+        {onDelete && (
+          <button
+            type="button"
+            onClick={() => onDelete(lead)}
+            className="mt-6 w-full rounded-md border px-4 py-2 text-sm font-medium text-status-danger hover:bg-status-danger-bg"
+          >
+            Delete lead
+          </button>
+        )}
       </div>
     </div>
   );
