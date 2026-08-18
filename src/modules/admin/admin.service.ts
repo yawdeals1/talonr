@@ -1,4 +1,5 @@
 import { studioListSorted } from "../../db/studio-client.js";
+import { normalizeStudioSourceType } from "../../db/source-type-compat.js";
 import type { ActivityLog, ScrapeJob, User, XAccount } from "../../db/schema.js";
 
 const byCreatedAtDesc = (a: { createdAt: string }, b: { createdAt: string }) =>
@@ -35,7 +36,7 @@ export async function listAllScrapeJobs(filters: AdminScrapeJobFilters) {
     { filter: { ...(filters.userId ? { userId: filters.userId } : {}), ...(filters.status ? { status: filters.status } : {}) }, cap: 200 },
     byCreatedAtDesc
   );
-  return jobs.slice(0, 200);
+  return jobs.slice(0, 200).map(normalizeStudioSourceType);
 }
 
 export interface AdminActivityFilters {

@@ -1,14 +1,8 @@
 import { env } from "../../config/env.js";
-import {
-  studioGet,
-  studioInsert,
-  studioListSorted,
-  studioTableHasColumn,
-  studioUpdate,
-} from "../../db/studio-client.js";
+import { normalizeStudioSourceType, toStudioSourceType } from "../../db/source-type-compat.js";
+import { studioGet, studioInsert, studioListSorted, studioUpdate } from "../../db/studio-client.js";
 import type { EngagementType, ScrapeJob, XAccount } from "../../db/schema.js";
 import { NotFoundError, ValidationError } from "../../lib/errors.js";
-import { logger } from "../../lib/logger.js";
 import { scrapeQueue } from "../../queue/queues.js";
 
 export interface CreateScrapeInput {
@@ -29,30 +23,14 @@ export async function createScrapeJob(userId: string, input: CreateScrapeInput) 
     throw new ValidationError(`X account is ${account.status}, cannot trigger a scrape`);
   }
 
-  const insertValues: Record<string, unknown> = {
+  const storedJob = await studioInsert<ScrapeJob>("scrape_jobs", {
     userId,
     xAccountId: input.xAccountId,
-    sourceType: input.sourceType,
+    sourceType: toStudioSourceType(input.sourceType),
     sourceRef: input.sourceRef,
     status: "queued",
-  };
-
-  // The queue payload below is the worker's source of truth. Keep the database write compatible
-  // with deployments where this newer optional column has not landed yet; once it appears in the
-  // live Studio schema, the selected strategies are persisted on the job row as well.
-  let canPersistEngagementTypes = false;
-  try {
-    canPersistEngagementTypes = await studioTableHasColumn("scrape_jobs", "engagement_types");
-  } catch (err) {
-    // This lookup only controls persistence of optional metadata; it must not prevent the queue
-    // job (which contains the same strategies) from being created during a transient spec outage.
-    logger.warn({ err }, "could not inspect scrape_jobs schema; omitting optional engagement_types");
-  }
-  if (canPersistEngagementTypes) {
-    insertValues.engagementTypes = input.engagementTypes ?? null;
-  }
-
-  const job = await studioInsert<ScrapeJob>("scrape_jobs", insertValues);
+  });
+  const job = normalizeStudioSourceType(storedJob);
 
   await scrapeQueue.add(
     "scrape",
@@ -77,7 +55,7 @@ export interface ListScrapesOptions {
 }
 
 export async function listScrapeJobs(userId: string, options: ListScrapesOptions) {
-  return studioListSorted<ScrapeJob>(
+  const jobs = await studioListSorted<ScrapeJob>(
     "scrape_jobs",
     {
       filter: {
@@ -88,12 +66,13 @@ export async function listScrapeJobs(userId: string, options: ListScrapesOptions
     },
     byCreatedAtDesc
   );
+  return jobs.map(normalizeStudioSourceType);
 }
 
 export async function getScrapeJob(userId: string, id: string) {
   const job = await studioGet<ScrapeJob>("scrape_jobs", id);
   if (!job || job.userId !== userId) throw new NotFoundError("Scrape job not found");
-  return job;
+  return normalizeStudioSourceType(job);
 }
 
 export async function cancelScrapeJob(userId: string, id: string) {
@@ -108,11 +87,12 @@ export async function cancelScrapeJob(userId: string, id: string) {
   }
 
   if (job.status === "queued") {
-    return studioUpdate<ScrapeJob>("scrape_jobs", id, {
+    const updated = await studioUpdate<ScrapeJob>("scrape_jobs", id, {
       status: "failed",
       errorMessage: "Cancelled by user",
       finishedAt: new Date(),
     });
+    return normalizeStudioSourceType(updated);
   }
 
   // Already running/terminal: best-effort only, can't hard-kill an in-flight Playwright run.

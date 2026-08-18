@@ -1,4 +1,5 @@
 import { studioGet, studioInsert, studioList, studioListSorted, studioUpdate } from "../../db/studio-client.js";
+import { normalizeStudioSourceType, toStudioSourceType } from "../../db/source-type-compat.js";
 import type { Lead, SourceType } from "../../db/schema.js";
 import { mapWithConcurrency } from "../../lib/concurrency.js";
 import { NotFoundError } from "../../lib/errors.js";
@@ -37,7 +38,7 @@ export async function upsertLeads(
       location: lead.location,
       verified: lead.verified,
       profileImage: lead.profileImage,
-      sourceType,
+      sourceType: toStudioSourceType(sourceType),
       sourceRef,
     };
 
@@ -64,7 +65,7 @@ export async function listLeads(userId: string, options: ListLeadsOptions) {
     {
       filter: {
         userId,
-        ...(options.sourceType ? { sourceType: options.sourceType } : {}),
+        ...(options.sourceType ? { sourceType: toStudioSourceType(options.sourceType) } : {}),
         ...(options.sourceRef ? { sourceRef: options.sourceRef } : {}),
       },
       cap: 5000,
@@ -72,9 +73,10 @@ export async function listLeads(userId: string, options: ListLeadsOptions) {
     (a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt)
   );
 
+  const normalized = all.map(normalizeStudioSourceType);
   const filtered = options.handle
-    ? all.filter((l) => l.handle.toLowerCase().includes(options.handle!.toLowerCase()))
-    : all;
+    ? normalized.filter((l) => l.handle.toLowerCase().includes(options.handle!.toLowerCase()))
+    : normalized;
 
   const start = (page - 1) * pageSize;
   const rows = filtered.slice(start, start + pageSize);
@@ -85,5 +87,5 @@ export async function listLeads(userId: string, options: ListLeadsOptions) {
 export async function getLead(userId: string, leadId: string) {
   const lead = await studioGet<Lead>("leads", leadId);
   if (!lead || lead.userId !== userId) throw new NotFoundError("Lead not found");
-  return lead;
+  return normalizeStudioSourceType(lead);
 }

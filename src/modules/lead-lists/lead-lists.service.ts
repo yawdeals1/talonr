@@ -1,4 +1,5 @@
 import { studioDelete, studioGet, studioInsert, studioListSorted, studioUpdate } from "../../db/studio-client.js";
+import { normalizeStudioSourceType } from "../../db/source-type-compat.js";
 import type { FilterDefinition, Lead, LeadList } from "../../db/schema.js";
 import { NotFoundError } from "../../lib/errors.js";
 import { buildFilterPredicate } from "./filter-query-builder.js";
@@ -55,7 +56,7 @@ export async function evaluateLeadList(userId: string, id: string, page = 1, pag
     (a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt)
   );
 
-  const matched = candidates.filter(predicate);
+  const matched = candidates.map(normalizeStudioSourceType).filter(predicate);
   const capped = list.filterDefinition.maxLeads ? matched.slice(0, list.filterDefinition.maxLeads) : matched;
   const start = (page - 1) * size;
   const rows = capped.slice(start, start + size);
