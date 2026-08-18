@@ -63,7 +63,8 @@ src/
 ├── modules/
 │   ├── auth/          routes, controller, service, middleware, deploro-auth.client.ts
 │   ├── accounts/       routes, controller, service       — X account CRUD, own-scoped
-│   ├── scrapes/        routes, controller, service       — trigger/list/detail/cancel scrape jobs
+│   ├── scrapes/        routes, controller, service, scrape-results.service.ts — scrape jobs plus
+│   │                                                        exact result membership/filter storage
 │   ├── leads/           routes, controller, service       — read scraped leads + upsertLeads()
 │   ├── lead-lists/     routes, controller, service, filter-query-builder.ts
 │   ├── admin/           routes, controller, service       — cross-user read-only routes
@@ -144,8 +145,12 @@ against a large multi-tenant dataset.
   so re-scraping refreshes fields + `last_seen_at` without touching `first_seen_at`.
 - **lead_lists**: id, user_id (FK), name, filter_definition (jsonb:
   `{bioKeywords?: string[], minFollowers?: number, maxFollowers?: number, location?: string,
-  verifiedOnly?: boolean, maxLeads?: number}` — `maxLeads` caps the total matched leads a list
-  evaluation returns across all pages, not a per-page size), created_at
+  verifiedOnly?: boolean, maxLeads?: number, leadIds?: string[]}` — `maxLeads` caps the total
+  matched leads a list evaluation returns across all pages; `leadIds` makes a static list from
+  checkbox-selected leads), created_at. Internal rows named `__talonr_scrape__:<jobId>` store each
+  new scrape's persisted result filter and exact lead IDs in the same JSONB column. Public
+  lead-list APIs hide/reject those rows; scrape APIs own their lifecycle. This avoids pretending
+  that every lead sharing a source type/reference belonged to one particular run.
 - **activity_log**: id, user_id (FK), action (varchar), metadata (jsonb), created_at — powers the
   admin activity feed via `logActivity(userId, action, metadata)`
 
@@ -314,14 +319,18 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 | POST | /accounts/session | connect token | `scripts/login.ts` posts a captured `storageState`/proxy back here, authenticated by the connect token instead of a Deploro session — listed in `app.ts`'s `PUBLIC_API_PATHS` for that reason, not because it's actually open |
 | PATCH | /accounts/:id | auth | Update dailyScrapeLimit / maxConcurrency / status |
 | DELETE | /accounts/:id | auth | Delete own account (cascades scrape_jobs) |
-| POST | /scrapes | auth | Create a scrape_jobs row + enqueue BullMQ job (`xAccountId`, `sourceType`: `search`\|`followers`\|`engagers`, `sourceRef`, `engagementTypes?` required for `engagers`, `capLeads?`) — rate-limited per user |
+| POST | /scrapes | auth | Create a scrape_jobs row + exact-result store, then enqueue BullMQ job (`xAccountId`, `sourceType`: `search`\|`followers`\|`engagers`, `sourceRef`, `engagementTypes?` required for `engagers`, `capLeads?`, optional `resultFilterDefinition`) — rate-limited per user; ingestion remains unfiltered |
 | GET | /scrapes | auth | List own jobs, filterable by `status`/`xAccountId` |
 | GET | /scrapes/:id | auth | Job detail/status |
+| GET | /scrapes/:id/leads | auth | Paginated exact members of that scrape, evaluated with its persisted follower/location filter |
+| PATCH | /scrapes/:id/result-filter | auth | Update the optional read-time follower/location filter for one scrape |
 | POST | /scrapes/:id/cancel | auth | Removes from queue if still waiting/delayed; best-effort if already running |
 | DELETE | /scrapes/:id | auth | Deletes a non-running scrape record/queue entry; collected leads remain saved |
+| POST | /scrapes/bulk-delete | auth | Delete selected non-running scrape records after ownership/running preflight; collected leads remain saved |
 | GET | /leads | auth | Paginated own leads, filterable by `handle`/`sourceType` |
 | GET | /leads/:id | auth | Lead detail |
 | DELETE | /leads/:id | auth | Permanently delete one owned lead; saved lead-list results update automatically |
+| POST | /leads/bulk-delete | auth | Permanently delete checkbox-selected owned leads after an all-or-nothing ownership preflight |
 | GET | /lead-lists | auth | List own saved filters |
 | POST | /lead-lists | auth | Create `{name, filterDefinition}` |
 | GET | /lead-lists/:id | auth | Get filter definition |

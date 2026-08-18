@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Lead } from "../../db/schema.js";
 import { NotFoundError } from "../../lib/errors.js";
-import { deleteLead, getLead, listLeads } from "./leads.service.js";
+import { deleteLead, deleteLeads, getLead, listLeads } from "./leads.service.js";
 
 // Compensating control for the lack of database-level tenant isolation (see
 // accounts.service.test.ts for the full rationale) — this file covers leads.service.ts's own
@@ -73,6 +73,18 @@ describe("leads.service ownership isolation", () => {
     studioGet.mockResolvedValue(ownedLead);
     await expect(deleteLead(ATTACKER, LEAD_ID)).rejects.toBeInstanceOf(NotFoundError);
     expect(studioDelete).not.toHaveBeenCalled();
+  });
+
+  it("deleteLeads: checks ownership of every id before bulk deletion", async () => {
+    studioGet.mockResolvedValue(ownedLead);
+    await expect(deleteLeads(ATTACKER, [LEAD_ID])).rejects.toBeInstanceOf(NotFoundError);
+    expect(studioDelete).not.toHaveBeenCalled();
+  });
+
+  it("deleteLeads: deletes each unique owned lead", async () => {
+    studioGet.mockResolvedValue(ownedLead);
+    await expect(deleteLeads(OWNER, [LEAD_ID, LEAD_ID])).resolves.toBe(1);
+    expect(studioDelete).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -9,7 +9,10 @@ import type { FilterDefinition, Lead } from "../../db/schema.js";
  * matching, since list-view scraping frequently can't populate follower counts.
  */
 export function buildFilterPredicate(filter: FilterDefinition): (lead: Lead) => boolean {
+  const selectedLeadIds = filter.leadIds ? new Set(filter.leadIds) : null;
   return (lead) => {
+    if (selectedLeadIds && !selectedLeadIds.has(lead.id)) return false;
+
     if (filter.bioKeywords && filter.bioKeywords.length > 0) {
       const bio = lead.bio?.toLowerCase() ?? "";
       if (!filter.bioKeywords.some((keyword) => bio.includes(keyword.toLowerCase()))) return false;

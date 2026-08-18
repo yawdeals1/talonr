@@ -5,6 +5,7 @@ import type { EngagementType, ScrapeJob, XAccount } from "../../db/schema.js";
 import { logger } from "../../lib/logger.js";
 import { logActivity } from "../../modules/activity/activity.service.js";
 import { upsertLeads } from "../../modules/leads/leads.service.js";
+import { saveScrapeJobLeadIds } from "../../modules/scrapes/scrape-results.service.js";
 import { closeScrapeSession, launchScrapeSession } from "../../scraper/browser.js";
 import { enrichLeadsFromProfiles } from "../../scraper/profile-enricher.js";
 import { decryptProxy, decryptSession } from "../../scraper/session-store.js";
@@ -93,8 +94,9 @@ async function runScrape(data: ScrapeJobData): Promise<{ leadsFound: number }> {
       minDelayMs: env.PROFILE_DELAY_MIN_MS,
       maxDelayMs: env.PROFILE_DELAY_MAX_MS,
     });
-    const leadsFound = await upsertLeads(data.userId, data.sourceType, data.sourceRef, enrichedLeads);
-    return { leadsFound };
+    const savedLeads = await upsertLeads(data.userId, data.sourceType, data.sourceRef, enrichedLeads);
+    await saveScrapeJobLeadIds(data.userId, data.scrapeJobId, savedLeads.map((lead) => lead.id));
+    return { leadsFound: savedLeads.length };
   } finally {
     await closeScrapeSession(session);
   }

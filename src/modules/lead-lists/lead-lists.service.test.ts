@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { LeadList } from "../../db/schema.js";
+import type { Lead, LeadList } from "../../db/schema.js";
 import { NotFoundError } from "../../lib/errors.js";
-import { deleteLeadList, evaluateLeadList, getLeadList, updateLeadList } from "./lead-lists.service.js";
+import { deleteLeadList, evaluateLeadList, getLeadList, listLeadLists, updateLeadList } from "./lead-lists.service.js";
 
 // Compensating control for the lack of database-level tenant isolation (see
 // accounts.service.test.ts for the full rationale) — this file covers lead-lists.service.ts's own
@@ -66,5 +66,50 @@ describe("lead-lists.service ownership isolation", () => {
     studioGet.mockResolvedValue(ownedList);
     await expect(evaluateLeadList(ATTACKER, LIST_ID)).rejects.toBeInstanceOf(NotFoundError);
     expect(studioListSorted).not.toHaveBeenCalled();
+  });
+});
+
+describe("static lead lists", () => {
+  const makeLead = (id: string): Lead => ({
+    id,
+    userId: OWNER,
+    handle: id,
+    displayName: id,
+    bio: null,
+    followers: 100,
+    location: null,
+    verified: false,
+    profileImage: null,
+    sourceType: "search",
+    sourceRef: "keyword",
+    firstSeenAt: "2026-01-01T00:00:00.000Z",
+    lastSeenAt: "2026-01-01T00:00:00.000Z",
+  });
+
+  it("evaluates an explicitly selected set without including other owned leads", async () => {
+    studioGet.mockResolvedValue({ ...ownedList, filterDefinition: { leadIds: ["selected"] } });
+    studioListSorted.mockResolvedValue([makeLead("selected"), makeLead("not-selected")]);
+
+    const result = await evaluateLeadList(OWNER, LIST_ID);
+
+    expect(result.leads.map((lead) => lead.id)).toEqual(["selected"]);
+  });
+});
+
+describe("internal scrape result stores", () => {
+  it("never exposes hidden scrape result records in the user's lead list index", async () => {
+    studioListSorted.mockResolvedValue([
+      ownedList,
+      {
+        ...ownedList,
+        id: "internal-result",
+        name: "__talonr_scrape__job-1",
+        filterDefinition: { internalScrapeResult: true, scrapeJobId: "job-1", leadIds: [] },
+      },
+    ]);
+
+    const result = await listLeadLists(OWNER);
+
+    expect(result).toEqual([ownedList]);
   });
 });

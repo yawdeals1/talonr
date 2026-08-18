@@ -1,7 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ScrapeJob, XAccount } from "../../db/schema.js";
+import type { Lead, LeadList, ScrapeJob, XAccount } from "../../db/schema.js";
 import { NotFoundError, ValidationError } from "../../lib/errors.js";
-import { cancelScrapeJob, createScrapeJob, deleteScrapeJob, getScrapeJob } from "./scrapes.service.js";
+import {
+  cancelScrapeJob,
+  createScrapeJob,
+  deleteScrapeJob,
+  deleteScrapeJobs,
+  getScrapeJob,
+  listScrapeJobLeads,
+  updateScrapeResultFilter,
+} from "./scrapes.service.js";
 
 // Compensating control for the lack of database-level tenant isolation (see
 // accounts.service.test.ts for the full rationale) — this file covers scrapes.service.ts's own
@@ -12,12 +20,15 @@ const studioGet = vi.fn();
 const studioInsert = vi.fn();
 const studioUpdate = vi.fn();
 const studioDelete = vi.fn();
+const studioList = vi.fn();
+const studioListSorted = vi.fn();
 const queueAdd = vi.fn();
 const queueGetJob = vi.fn();
 
 vi.mock("../../db/studio-client.js", () => ({
   studioGet: (...args: unknown[]) => studioGet(...args),
-  studioListSorted: vi.fn(),
+  studioList: (...args: unknown[]) => studioList(...args),
+  studioListSorted: (...args: unknown[]) => studioListSorted(...args),
   studioInsert: (...args: unknown[]) => studioInsert(...args),
   studioUpdate: (...args: unknown[]) => studioUpdate(...args),
   studioDelete: (...args: unknown[]) => studioDelete(...args),
@@ -54,6 +65,9 @@ const ownedJob: ScrapeJob = {
   xAccountId: ACCOUNT_ID,
   sourceType: "search",
   sourceRef: "keyword",
+  engagementTypes: null,
+  resultFilterDefinition: {},
+  tracksExactLeads: true,
   status: "queued",
   leadsFound: 0,
   errorMessage: null,
@@ -62,8 +76,21 @@ const ownedJob: ScrapeJob = {
   createdAt: "2026-01-01T00:00:00.000Z",
 };
 
+const resultStore: LeadList = {
+  id: "result-store-1",
+  userId: OWNER,
+  name: `__talonr_scrape__:${JOB_ID}`,
+  filterDefinition: {
+    internalScrapeResult: true,
+    scrapeJobId: JOB_ID,
+    leadIds: [],
+  } as LeadList["filterDefinition"],
+  createdAt: "2026-01-01T00:00:00.000Z",
+};
+
 beforeEach(() => {
   vi.resetAllMocks();
+  studioList.mockResolvedValue({ rows: [], total: 0 });
 });
 
 describe("scrapes.service ownership isolation", () => {
@@ -78,7 +105,7 @@ describe("scrapes.service ownership isolation", () => {
 
   it("createScrapeJob: the owner can trigger a scrape against their own active x_account", async () => {
     studioGet.mockResolvedValue(ownedAccount);
-    studioInsert.mockResolvedValue(ownedJob);
+    studioInsert.mockImplementation(async (table: string) => (table === "scrape_jobs" ? ownedJob : resultStore));
     const result = await createScrapeJob(OWNER, {
       xAccountId: ACCOUNT_ID,
       sourceType: "search",
@@ -97,7 +124,9 @@ describe("scrapes.service ownership isolation", () => {
 
   it("createScrapeJob: stores the legacy enum value but queues the real engagement strategy", async () => {
     studioGet.mockResolvedValue(ownedAccount);
-    studioInsert.mockResolvedValue({ ...ownedJob, sourceType: "engagers" });
+    studioInsert.mockImplementation(async (table: string) =>
+      table === "scrape_jobs" ? { ...ownedJob, sourceType: "engagers" } : resultStore
+    );
 
     await createScrapeJob(OWNER, {
       xAccountId: ACCOUNT_ID,
@@ -118,6 +147,32 @@ describe("scrapes.service ownership isolation", () => {
       "scrape",
       expect.objectContaining({ engagementTypes: ["retweeters"], capLeads: 15 }),
       expect.any(Object)
+    );
+  });
+
+  it("createScrapeJob: persists optional result filters in its hidden exact-result store", async () => {
+    studioGet.mockResolvedValue(ownedAccount);
+    studioInsert.mockImplementation(async (table: string) => (table === "scrape_jobs" ? ownedJob : resultStore));
+
+    await createScrapeJob(OWNER, {
+      xAccountId: ACCOUNT_ID,
+      sourceType: "search",
+      sourceRef: "keyword",
+      resultFilterDefinition: { maxFollowers: 2_000, location: "Ghana" },
+    });
+
+    expect(studioInsert).toHaveBeenCalledWith(
+      "lead_lists",
+      expect.objectContaining({
+        userId: OWNER,
+        filterDefinition: expect.objectContaining({
+          internalScrapeResult: true,
+          scrapeJobId: JOB_ID,
+          leadIds: [],
+          maxFollowers: 2_000,
+          location: "Ghana",
+        }),
+      })
     );
   });
 
@@ -157,5 +212,78 @@ describe("scrapes.service ownership isolation", () => {
 
     expect(remove).toHaveBeenCalledTimes(1);
     expect(studioDelete).toHaveBeenCalledWith("scrape_jobs", JOB_ID);
+  });
+
+  it("deleteScrapeJobs: checks ownership before any bulk queue or database deletion", async () => {
+    studioGet.mockResolvedValue(ownedJob);
+
+    await expect(deleteScrapeJobs(ATTACKER, [JOB_ID])).rejects.toBeInstanceOf(NotFoundError);
+
+    expect(queueGetJob).not.toHaveBeenCalled();
+    expect(studioDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe("scrape-specific lead membership", () => {
+  const lead = (id: string, followers: number): Lead => ({
+    id,
+    userId: OWNER,
+    handle: id,
+    displayName: id,
+    bio: null,
+    followers,
+    location: "Accra, Ghana",
+    verified: false,
+    profileImage: null,
+    sourceType: "search",
+    sourceRef: "keyword",
+    firstSeenAt: "2026-01-01T00:00:00.000Z",
+    lastSeenAt: "2026-01-01T00:00:00.000Z",
+  });
+
+  it("returns only exact job members that match the persisted follower filter", async () => {
+    studioGet
+      .mockResolvedValueOnce({ ...ownedJob, resultFilterDefinition: { maxFollowers: 2_000 } })
+      .mockResolvedValueOnce(lead("qualified", 1_500))
+      .mockResolvedValueOnce(lead("too-large", 50_000));
+    studioList.mockResolvedValue({
+      rows: [
+        {
+          ...resultStore,
+          filterDefinition: {
+            internalScrapeResult: true,
+            scrapeJobId: JOB_ID,
+            leadIds: ["qualified", "too-large"],
+            maxFollowers: 2_000,
+          },
+        },
+      ],
+      total: 1,
+    });
+
+    const result = await listScrapeJobLeads(OWNER, JOB_ID);
+
+    expect(result.leads.map((row) => row.id)).toEqual(["qualified"]);
+    expect(result.total).toBe(1);
+    expect(result.exactMembershipAvailable).toBe(true);
+  });
+
+  it("does not approximate membership for jobs created before exact tracking", async () => {
+    studioGet.mockResolvedValue({ ...ownedJob, tracksExactLeads: false });
+
+    const result = await listScrapeJobLeads(OWNER, JOB_ID);
+
+    expect(result.leads).toEqual([]);
+    expect(result.exactMembershipAvailable).toBe(false);
+    expect(studioListSorted).not.toHaveBeenCalled();
+  });
+
+  it("does not allow another user to change a scrape's persisted filter", async () => {
+    studioGet.mockResolvedValue(ownedJob);
+
+    await expect(updateScrapeResultFilter(ATTACKER, JOB_ID, { maxFollowers: 2_000 })).rejects.toBeInstanceOf(
+      NotFoundError
+    );
+    expect(studioUpdate).not.toHaveBeenCalled();
   });
 });

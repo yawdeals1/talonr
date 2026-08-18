@@ -2,18 +2,22 @@ import { studioDelete, studioGet, studioInsert, studioListSorted, studioUpdate }
 import { normalizeStudioSourceType } from "../../db/source-type-compat.js";
 import type { FilterDefinition, Lead, LeadList } from "../../db/schema.js";
 import { NotFoundError } from "../../lib/errors.js";
+import { isInternalScrapeResultList } from "../scrapes/scrape-results.service.js";
 import { buildFilterPredicate } from "./filter-query-builder.js";
 
 const byCreatedAtDesc = (a: { createdAt: string }, b: { createdAt: string }) =>
   b.createdAt.localeCompare(a.createdAt);
 
 export async function listLeadLists(userId: string) {
-  return studioListSorted<LeadList>("lead_lists", { filter: { userId } }, byCreatedAtDesc);
+  const lists = await studioListSorted<LeadList>("lead_lists", { filter: { userId } }, byCreatedAtDesc);
+  return lists.filter((list) => !isInternalScrapeResultList(list));
 }
 
 async function findOwnedOrThrow(userId: string, id: string): Promise<LeadList> {
   const list = await studioGet<LeadList>("lead_lists", id);
-  if (!list || list.userId !== userId) throw new NotFoundError("Lead list not found");
+  if (!list || list.userId !== userId || isInternalScrapeResultList(list)) {
+    throw new NotFoundError("Lead list not found");
+  }
   return list;
 }
 

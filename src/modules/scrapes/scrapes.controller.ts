@@ -3,7 +3,36 @@ import { z } from "zod";
 import { ValidationError } from "../../lib/errors.js";
 import { X_HANDLE_PATTERN, X_TWEET_URL_PATTERN } from "../../scraper/types.js";
 import type { AuthedRequest } from "../auth/auth.middleware.js";
-import { cancelScrapeJob, createScrapeJob, deleteScrapeJob, getScrapeJob, listScrapeJobs } from "./scrapes.service.js";
+import {
+  cancelScrapeJob,
+  createScrapeJob,
+  deleteScrapeJob,
+  deleteScrapeJobs,
+  getScrapeJob,
+  listScrapeJobLeads,
+  listScrapeJobs,
+  updateScrapeResultFilter,
+} from "./scrapes.service.js";
+
+const resultFilterSchema = z
+  .object({
+    minFollowers: z.number().int().nonnegative().optional(),
+    maxFollowers: z.number().int().nonnegative().optional(),
+    location: z.string().trim().min(1).max(200).optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (
+      data.minFollowers !== undefined &&
+      data.maxFollowers !== undefined &&
+      data.minFollowers > data.maxFollowers
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["maxFollowers"],
+        message: "Maximum followers must be greater than or equal to minimum followers",
+      });
+    }
+  });
 
 // sourceRef ends up in the worker's Playwright page.goto() (see scraper/sources/*.source.ts) — for
 // "followers"/"engagers" it must be constrained to X's own handle/tweet-URL shape, or a user could
@@ -20,6 +49,7 @@ const createSchema = z
     sourceRef: z.string().min(1).max(2000),
     engagementTypes: z.array(z.enum(["repliers", "retweeters"])).min(1).optional(),
     capLeads: z.number().int().positive().max(1000).optional(),
+    resultFilterDefinition: resultFilterSchema.optional(),
   })
   .superRefine((data, ctx) => {
     if (data.sourceType === "followers" && !X_HANDLE_PATTERN.test(data.sourceRef)) {
@@ -52,6 +82,13 @@ const listQuerySchema = z.object({
   xAccountId: z.string().uuid().optional(),
 });
 
+const paginationSchema = z.object({
+  page: z.coerce.number().int().positive().optional(),
+  pageSize: z.coerce.number().int().positive().optional(),
+});
+
+const bulkDeleteSchema = z.object({ ids: z.array(z.string().uuid()).min(1).max(500) });
+
 export async function create(req: AuthedRequest, res: Response) {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Invalid request");
@@ -68,6 +105,18 @@ export async function get(req: AuthedRequest, res: Response) {
   res.json({ scrapeJob: await getScrapeJob(req.user!.id, req.params.id) });
 }
 
+export async function listLeads(req: AuthedRequest, res: Response) {
+  const parsed = paginationSchema.safeParse(req.query);
+  if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Invalid query");
+  res.json(await listScrapeJobLeads(req.user!.id, req.params.id, parsed.data.page, parsed.data.pageSize));
+}
+
+export async function updateResultFilter(req: AuthedRequest, res: Response) {
+  const parsed = resultFilterSchema.safeParse(req.body);
+  if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Invalid request");
+  res.json({ scrapeJob: await updateScrapeResultFilter(req.user!.id, req.params.id, parsed.data) });
+}
+
 export async function cancel(req: AuthedRequest, res: Response) {
   res.json({ scrapeJob: await cancelScrapeJob(req.user!.id, req.params.id) });
 }
@@ -75,4 +124,10 @@ export async function cancel(req: AuthedRequest, res: Response) {
 export async function remove(req: AuthedRequest, res: Response) {
   await deleteScrapeJob(req.user!.id, req.params.id);
   res.status(204).send();
+}
+
+export async function bulkRemove(req: AuthedRequest, res: Response) {
+  const parsed = bulkDeleteSchema.safeParse(req.body);
+  if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Invalid request");
+  res.json({ deletedCount: await deleteScrapeJobs(req.user!.id, parsed.data.ids) });
 }

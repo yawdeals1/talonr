@@ -13,16 +13,36 @@ export function LeadsTable({
   leads,
   onRowClick,
   onDelete,
+  selectedLeadIds,
+  onSelectionChange,
+  onSelectAll,
 }: {
   leads: Lead[];
   onRowClick: (lead: Lead) => void;
   onDelete?: (lead: Lead) => void;
+  selectedLeadIds?: Set<string>;
+  onSelectionChange?: (leadId: string, selected: boolean) => void;
+  onSelectAll?: (selected: boolean) => void;
 }) {
+  const selectionEnabled = selectedLeadIds !== undefined && onSelectionChange !== undefined;
+  const allSelected = selectionEnabled && leads.length > 0 && leads.every((lead) => selectedLeadIds.has(lead.id));
+
   return (
     <div className="overflow-x-auto rounded-lg border">
       <table className="w-full text-sm">
         <thead className="border-b bg-zinc-50 text-left text-xs text-zinc-500 dark:bg-zinc-900/40">
           <tr>
+            {selectionEnabled && (
+              <th className="w-10 px-3 py-2 font-medium">
+                <input
+                  type="checkbox"
+                  aria-label="Select all leads on this page"
+                  checked={allSelected}
+                  onChange={(event) => onSelectAll?.(event.target.checked)}
+                  className="h-4 w-4 rounded border-zinc-300 accent-accent"
+                />
+              </th>
+            )}
             <th className="px-3 py-2 font-medium">Handle</th>
             <th className="px-3 py-2 font-medium">Name</th>
             <th className="px-3 py-2 font-medium">Bio</th>
@@ -40,6 +60,17 @@ export function LeadsTable({
               className="cursor-pointer border-b last:border-0 hover:bg-zinc-50 dark:hover:bg-zinc-900/40"
               onClick={() => onRowClick(lead)}
             >
+              {selectionEnabled && (
+                <td className="w-10 px-3 py-2" onClick={(event) => event.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    aria-label={`Select @${lead.handle}`}
+                    checked={selectedLeadIds.has(lead.id)}
+                    onChange={(event) => onSelectionChange(lead.id, event.target.checked)}
+                    className="h-4 w-4 rounded border-zinc-300 accent-accent"
+                  />
+                </td>
+              )}
               <td className="px-3 py-2">
                 <div className="flex items-center gap-2">
                   {lead.profileImage ? (

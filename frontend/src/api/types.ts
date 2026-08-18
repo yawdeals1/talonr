@@ -40,12 +40,20 @@ export interface ScrapeJob {
   sourceType: SourceType;
   sourceRef: string;
   engagementTypes: EngagementType[] | null;
+  resultFilterDefinition: ScrapeResultFilter;
+  tracksExactLeads: boolean;
   status: ScrapeJobStatus;
   leadsFound: number;
   errorMessage: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;
+}
+
+export interface ScrapeResultFilter {
+  minFollowers?: number;
+  maxFollowers?: number;
+  location?: string;
 }
 
 export interface Lead {
@@ -65,6 +73,7 @@ export interface Lead {
 }
 
 export interface FilterDefinition {
+  leadIds?: string[];
   bioKeywords?: string[];
   minFollowers?: number;
   maxFollowers?: number;

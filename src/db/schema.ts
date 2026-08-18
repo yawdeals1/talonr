@@ -50,12 +50,22 @@ export interface ScrapeJob {
   // Only set (and only meaningful) when sourceType is "engagers" — which of the two engagement
   // strategies (repliers, retweeters) this job was asked to run. Null for every other source type.
   engagementTypes: EngagementType[] | null;
+  resultFilterDefinition: ScrapeResultFilter;
+  // False for jobs created before exact per-job lead membership was introduced. New jobs keep
+  // exact lead ids and this filter in a hidden internal lead_lists JSONB record.
+  tracksExactLeads: boolean;
   status: ScrapeJobStatus;
   leadsFound: number;
   errorMessage: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;
+}
+
+export interface ScrapeResultFilter {
+  minFollowers?: number;
+  maxFollowers?: number;
+  location?: string;
 }
 
 export interface Lead {
@@ -75,6 +85,9 @@ export interface Lead {
 }
 
 export interface FilterDefinition {
+  // When set, this is a static list created from explicitly selected leads. It can still be
+  // combined with the dynamic fields below if the list is edited later.
+  leadIds?: string[];
   bioKeywords?: string[];
   minFollowers?: number;
   maxFollowers?: number;

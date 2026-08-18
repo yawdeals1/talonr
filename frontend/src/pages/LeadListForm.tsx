@@ -51,6 +51,7 @@ export function LeadListForm() {
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     const filterDefinition: FilterDefinition = {
+      leadIds: existingQuery.data?.leadList.filterDefinition.leadIds,
       bioKeywords: bioKeywords.length > 0 ? bioKeywords : undefined,
       minFollowers: minFollowers ? Number(minFollowers) : undefined,
       maxFollowers: maxFollowers ? Number(maxFollowers) : undefined,

@@ -37,6 +37,7 @@ function formatFollowerCount(n: number): string {
 }
 
 export function summarizeFilter(filter: {
+  leadIds?: string[];
   bioKeywords?: string[];
   minFollowers?: number;
   maxFollowers?: number;
@@ -45,6 +46,9 @@ export function summarizeFilter(filter: {
   maxLeads?: number;
 }): string {
   const parts: string[] = [];
+  if (filter.leadIds?.length) {
+    parts.push(`${filter.leadIds.length} selected lead${filter.leadIds.length === 1 ? "" : "s"}`);
+  }
   if (filter.bioKeywords && filter.bioKeywords.length > 0) {
     parts.push(`bio: ${filter.bioKeywords.join(", ")}`);
   }

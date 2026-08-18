@@ -1,9 +1,19 @@
 import { env } from "../../config/env.js";
 import { normalizeStudioSourceType, toStudioSourceType } from "../../db/source-type-compat.js";
 import { studioDelete, studioGet, studioInsert, studioListSorted, studioUpdate } from "../../db/studio-client.js";
-import type { EngagementType, ScrapeJob, XAccount } from "../../db/schema.js";
+import type { EngagementType, Lead, ScrapeJob, ScrapeResultFilter, XAccount } from "../../db/schema.js";
+import { mapWithConcurrency } from "../../lib/concurrency.js";
 import { NotFoundError, ValidationError } from "../../lib/errors.js";
 import { scrapeQueue } from "../../queue/queues.js";
+import { buildFilterPredicate } from "../lead-lists/filter-query-builder.js";
+import {
+  attachScrapeResultSettings,
+  createScrapeResultStore,
+  deleteScrapeResultStore,
+  getScrapeResultStore,
+  scrapeResultLeadIds,
+  updateScrapeResultStoreFilter,
+} from "./scrape-results.service.js";
 
 export interface CreateScrapeInput {
   xAccountId: string;
@@ -11,6 +21,7 @@ export interface CreateScrapeInput {
   sourceRef: string;
   engagementTypes?: EngagementType[];
   capLeads?: number;
+  resultFilterDefinition?: ScrapeResultFilter;
 }
 
 const byCreatedAtDesc = (a: { createdAt: string }, b: { createdAt: string }) =>
@@ -30,7 +41,15 @@ export async function createScrapeJob(userId: string, input: CreateScrapeInput) 
     sourceRef: input.sourceRef,
     status: "queued",
   });
-  const job = normalizeStudioSourceType(storedJob);
+  const normalizedJob = normalizeStudioSourceType(storedJob);
+  let job: ScrapeJob;
+  try {
+    const store = await createScrapeResultStore(userId, normalizedJob.id, input.resultFilterDefinition ?? {});
+    job = attachScrapeResultSettings(normalizedJob, store);
+  } catch (error) {
+    await studioDelete("scrape_jobs", normalizedJob.id);
+    throw error;
+  }
 
   await scrapeQueue.add(
     "scrape",
@@ -66,13 +85,51 @@ export async function listScrapeJobs(userId: string, options: ListScrapesOptions
     },
     byCreatedAtDesc
   );
-  return jobs.map(normalizeStudioSourceType);
+  return mapWithConcurrency(jobs.map(normalizeStudioSourceType), 8, async (job) =>
+    attachScrapeResultSettings(job, await getScrapeResultStore(userId, job.id))
+  );
 }
 
 export async function getScrapeJob(userId: string, id: string) {
   const job = await studioGet<ScrapeJob>("scrape_jobs", id);
   if (!job || job.userId !== userId) throw new NotFoundError("Scrape job not found");
-  return normalizeStudioSourceType(job);
+  const normalized = normalizeStudioSourceType(job);
+  return attachScrapeResultSettings(normalized, await getScrapeResultStore(userId, id));
+}
+
+export async function updateScrapeResultFilter(userId: string, id: string, filter: ScrapeResultFilter) {
+  const job = await getScrapeJob(userId, id);
+  const store = await updateScrapeResultStoreFilter(userId, id, filter);
+  if (!store) throw new ValidationError("Exact lead tracking is unavailable for this older scrape");
+  return attachScrapeResultSettings(job, store);
+}
+
+export async function listScrapeJobLeads(userId: string, id: string, page = 1, pageSize = 50) {
+  const job = await getScrapeJob(userId, id);
+  const size = Math.min(pageSize, 200);
+  if (!job.tracksExactLeads) {
+    return { scrapeJob: job, leads: [], page, pageSize: size, total: 0, exactMembershipAvailable: false };
+  }
+
+  const store = await getScrapeResultStore(userId, id);
+  if (!store) {
+    return { scrapeJob: job, leads: [], page, pageSize: size, total: 0, exactMembershipAvailable: false };
+  }
+  const fetched = await mapWithConcurrency(scrapeResultLeadIds(store), 8, (leadId) => studioGet<Lead>("leads", leadId));
+  const candidates = fetched
+    .filter((lead): lead is Lead => lead !== null && lead.userId === userId)
+    .map(normalizeStudioSourceType);
+  const matched = candidates.filter(buildFilterPredicate(job.resultFilterDefinition ?? {}));
+  const start = (page - 1) * size;
+
+  return {
+    scrapeJob: job,
+    leads: matched.slice(start, start + size),
+    page,
+    pageSize: size,
+    total: matched.length,
+    exactMembershipAvailable: true,
+  };
 }
 
 export async function cancelScrapeJob(userId: string, id: string) {
@@ -92,7 +149,7 @@ export async function cancelScrapeJob(userId: string, id: string) {
       errorMessage: "Cancelled by user",
       finishedAt: new Date(),
     });
-    return normalizeStudioSourceType(updated);
+    return attachScrapeResultSettings(normalizeStudioSourceType(updated), await getScrapeResultStore(userId, id));
   }
 
   // Already running/terminal: best-effort only, can't hard-kill an in-flight Playwright run.
@@ -114,5 +171,25 @@ export async function deleteScrapeJob(userId: string, id: string): Promise<void>
     await bullJob.remove();
   }
 
+  await deleteScrapeResultStore(userId, id);
   await studioDelete("scrape_jobs", id);
+}
+
+export async function deleteScrapeJobs(userId: string, ids: string[]): Promise<number> {
+  const uniqueIds = [...new Set(ids)];
+  const jobs = await mapWithConcurrency(uniqueIds, 8, (id) => getScrapeJob(userId, id));
+  if (jobs.some((job) => job.status === "running")) {
+    throw new ValidationError("Running scrapes cannot be deleted");
+  }
+
+  const queuedJobs = await mapWithConcurrency(uniqueIds, 8, (id) => scrapeQueue.getJob(id));
+  const states = await mapWithConcurrency(queuedJobs, 8, (job) => job?.getState() ?? Promise.resolve("missing"));
+  if (states.includes("active")) throw new ValidationError("Running scrapes cannot be deleted");
+
+  await mapWithConcurrency(queuedJobs, 8, async (job) => {
+    if (job) await job.remove();
+  });
+  await mapWithConcurrency(uniqueIds, 8, (id) => deleteScrapeResultStore(userId, id));
+  await mapWithConcurrency(uniqueIds, 8, (id) => studioDelete("scrape_jobs", id));
+  return uniqueIds.length;
 }

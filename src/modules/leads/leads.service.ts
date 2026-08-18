@@ -30,10 +30,10 @@ export async function upsertLeads(
   sourceType: "search" | "followers" | "engagers",
   sourceRef: string,
   rawLeads: RawLead[]
-): Promise<number> {
-  if (rawLeads.length === 0) return 0;
+): Promise<Lead[]> {
+  if (rawLeads.length === 0) return [];
 
-  await mapWithConcurrency(rawLeads, UPSERT_CONCURRENCY, async (lead) => {
+  return mapWithConcurrency(rawLeads, UPSERT_CONCURRENCY, async (lead) => {
     const { rows } = await studioList<Lead>("leads", { filter: { userId, handle: lead.handle }, limit: 1 });
     const fields = {
       displayName: lead.displayName,
@@ -47,14 +47,13 @@ export async function upsertLeads(
     };
 
     if (rows[0]) {
-      await studioUpdate<Lead>("leads", rows[0].id, { ...fields, lastSeenAt: new Date() });
+      return studioUpdate<Lead>("leads", rows[0].id, { ...fields, lastSeenAt: new Date() });
     } else {
       // firstSeenAt/lastSeenAt omitted — the column defaults (NOW()) apply on insert.
-      await studioInsert<Lead>("leads", { userId, handle: lead.handle, ...fields });
+      return studioInsert<Lead>("leads", { userId, handle: lead.handle, ...fields });
     }
   });
 
-  return rawLeads.length;
 }
 
 export async function listLeads(userId: string, options: ListLeadsOptions) {
@@ -102,4 +101,13 @@ export async function getLead(userId: string, leadId: string) {
 export async function deleteLead(userId: string, leadId: string): Promise<void> {
   await getLead(userId, leadId);
   await studioDelete("leads", leadId);
+}
+
+export async function deleteLeads(userId: string, leadIds: string[]): Promise<number> {
+  const uniqueIds = [...new Set(leadIds)];
+  // Finish every ownership check before deleting anything so a foreign id cannot cause a
+  // partially-applied request.
+  await mapWithConcurrency(uniqueIds, UPSERT_CONCURRENCY, (leadId) => getLead(userId, leadId));
+  await mapWithConcurrency(uniqueIds, UPSERT_CONCURRENCY, (leadId) => studioDelete("leads", leadId));
+  return uniqueIds.length;
 }

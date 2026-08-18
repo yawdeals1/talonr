@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { listAccounts } from "../api/accounts";
-import { deleteScrape, listScrapes } from "../api/scrapes";
+import { bulkDeleteScrapes, deleteScrape, listScrapes } from "../api/scrapes";
 import type { ScrapeJob, ScrapeJobStatus } from "../api/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
@@ -18,6 +18,8 @@ export function ScrapeJobs() {
   const [status, setStatus] = useState<ScrapeJobStatus | "">("");
   const [xAccountId, setXAccountId] = useState("");
   const [deleting, setDeleting] = useState<ScrapeJob | null>(null);
+  const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(() => new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
 
   const accountsQuery = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
   const scrapesQuery = useQuery({
@@ -41,6 +43,39 @@ export function ScrapeJobs() {
       setDeleting(null);
     },
   });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: () => bulkDeleteScrapes([...selectedJobIds]),
+    onSuccess: () => {
+      setSelectedJobIds(new Set());
+      setConfirmBulkDelete(false);
+      queryClient.invalidateQueries({ queryKey: ["scrapes"] });
+    },
+  });
+
+  const selectableJobs = jobs.filter((job) => job.status !== "running");
+  const allSelectableJobsSelected =
+    selectableJobs.length > 0 && selectableJobs.every((job) => selectedJobIds.has(job.id));
+
+  function setJobSelected(jobId: string, selected: boolean) {
+    setSelectedJobIds((current) => {
+      const next = new Set(current);
+      if (selected) next.add(jobId);
+      else next.delete(jobId);
+      return next;
+    });
+  }
+
+  function selectAllJobs(selected: boolean) {
+    setSelectedJobIds((current) => {
+      const next = new Set(current);
+      for (const job of selectableJobs) {
+        if (selected) next.add(job.id);
+        else next.delete(job.id);
+      }
+      return next;
+    });
+  }
 
   return (
     <div className="space-y-4">
@@ -92,6 +127,19 @@ export function ScrapeJobs() {
         </button>
       </div>
 
+      {selectedJobIds.size > 0 && (
+        <div className="flex items-center justify-between rounded-md border px-3 py-2">
+          <span className="text-sm text-zinc-500">{selectedJobIds.size} scrapes selected</span>
+          <button
+            type="button"
+            onClick={() => setConfirmBulkDelete(true)}
+            className="rounded-md border border-status-danger-bg px-3 py-1.5 text-xs font-medium text-status-danger hover:bg-status-danger-bg"
+          >
+            Delete selected
+          </button>
+        </div>
+      )}
+
       {scrapesQuery.isLoading ? (
         <SkeletonRows rows={6} cols={6} />
       ) : jobs.length === 0 ? (
@@ -116,6 +164,15 @@ export function ScrapeJobs() {
           <table className="w-full text-sm">
             <thead className="border-b bg-zinc-50 text-left text-xs text-zinc-500 dark:bg-zinc-900/40">
               <tr>
+                <th className="w-10 px-3 py-2 font-medium">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all deletable scrapes"
+                    checked={allSelectableJobsSelected}
+                    onChange={(event) => selectAllJobs(event.target.checked)}
+                    className="h-4 w-4 rounded border-zinc-300 accent-accent"
+                  />
+                </th>
                 <th className="px-3 py-2 font-medium">Source</th>
                 <th className="px-3 py-2 font-medium">Reference</th>
                 <th className="px-3 py-2 font-medium">Account</th>
@@ -133,6 +190,16 @@ export function ScrapeJobs() {
                   className="cursor-pointer border-b last:border-0 hover:bg-zinc-50 dark:hover:bg-zinc-900/40"
                   onClick={() => navigate(`/scrapes/${job.id}`)}
                 >
+                  <td className="w-10 px-3 py-2" onClick={(event) => event.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      aria-label={`Select scrape ${job.sourceRef}`}
+                      checked={selectedJobIds.has(job.id)}
+                      disabled={job.status === "running"}
+                      onChange={(event) => setJobSelected(job.id, event.target.checked)}
+                      className="h-4 w-4 rounded border-zinc-300 accent-accent disabled:opacity-40"
+                    />
+                  </td>
                   <td className="px-3 py-2 capitalize">{job.sourceType}</td>
                   <td className="max-w-[200px] truncate px-3 py-2 font-mono text-xs" title={job.sourceRef}>
                     {job.sourceRef}
@@ -175,6 +242,20 @@ export function ScrapeJobs() {
           onConfirm={() => deleteMutation.mutate(deleting.id)}
           onCancel={() => setDeleting(null)}
         />
+      )}
+
+      {confirmBulkDelete && (
+        <ConfirmDialog
+          title={`Delete ${selectedJobIds.size} scrapes?`}
+          message="This permanently removes the selected scrape records. Their collected leads remain saved."
+          confirmLabel={bulkDeleteMutation.isPending ? "Deleting…" : "Delete selected"}
+          onConfirm={() => bulkDeleteMutation.mutate()}
+          onCancel={() => setConfirmBulkDelete(false)}
+        />
+      )}
+
+      {bulkDeleteMutation.error instanceof Error && (
+        <p className="text-sm text-status-danger">{bulkDeleteMutation.error.message}</p>
       )}
     </div>
   );

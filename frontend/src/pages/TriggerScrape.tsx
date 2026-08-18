@@ -3,9 +3,8 @@ import { useId, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 import { listAccounts } from "../api/accounts";
 import { ApiError } from "../api/client";
-import type { ListLeadsFilters } from "../api/leads";
-import { createScrape, type CreateScrapeInput } from "../api/scrapes";
-import type { EngagementType, SourceType } from "../api/types";
+import { createScrape } from "../api/scrapes";
+import type { EngagementType, ScrapeResultFilter, SourceType } from "../api/types";
 import { SkeletonRows } from "../components/Skeleton";
 
 const SOURCE_TYPES: { value: SourceType; label: string; description: string; fieldLabel: string; placeholder: string }[] = [
@@ -39,12 +38,6 @@ const ENGAGEMENT_TYPES: { value: EngagementType; label: string }[] = [
   { value: "retweeters", label: "Retweeters (reposts)" },
 ];
 
-type ResultFilters = Pick<ListLeadsFilters, "minFollowers" | "maxFollowers" | "location">;
-interface TriggerScrapeSubmission {
-  scrape: CreateScrapeInput;
-  resultFilters: ResultFilters;
-}
-
 export function TriggerScrape() {
   const navigate = useNavigate();
   const accountsQuery = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
@@ -61,18 +54,8 @@ export function TriggerScrape() {
   const idPrefix = useId();
 
   const mutation = useMutation({
-    mutationFn: ({ scrape }: TriggerScrapeSubmission) => createScrape(scrape),
-    onSuccess: ({ scrapeJob }, { resultFilters }) => {
-      const searchParams = new URLSearchParams();
-      if (resultFilters.minFollowers !== undefined) {
-        searchParams.set("minFollowers", String(resultFilters.minFollowers));
-      }
-      if (resultFilters.maxFollowers !== undefined) {
-        searchParams.set("maxFollowers", String(resultFilters.maxFollowers));
-      }
-      if (resultFilters.location) searchParams.set("location", resultFilters.location);
-      navigate({ pathname: `/scrapes/${scrapeJob.id}`, search: searchParams.toString() });
-    },
+    mutationFn: createScrape,
+    onSuccess: ({ scrapeJob }) => navigate(`/scrapes/${scrapeJob.id}`),
   });
 
   const accounts = accountsQuery.data?.accounts ?? [];
@@ -122,19 +105,18 @@ export function TriggerScrape() {
 
     const locationFilter = location.trim();
 
-    mutation.mutate({
-      scrape: {
-        xAccountId,
-        sourceType,
-        sourceRef: sourceRef.trim(),
-        engagementTypes: sourceType === "engagers" ? engagementTypes : undefined,
-        capLeads: cap,
-      },
-      resultFilters: {
+    const resultFilterDefinition: ScrapeResultFilter = {
         ...(min !== undefined ? { minFollowers: min } : {}),
         ...(max !== undefined ? { maxFollowers: max } : {}),
         ...(locationFilter ? { location: locationFilter } : {}),
-      },
+    };
+    mutation.mutate({
+      xAccountId,
+      sourceType,
+      sourceRef: sourceRef.trim(),
+      engagementTypes: sourceType === "engagers" ? engagementTypes : undefined,
+      capLeads: cap,
+      resultFilterDefinition,
     });
   }
 

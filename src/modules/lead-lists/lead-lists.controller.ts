@@ -12,6 +12,7 @@ import {
 } from "./lead-lists.service.js";
 
 const filterDefinitionSchema = z.object({
+  leadIds: z.array(z.string().uuid()).min(1).max(1000).optional(),
   bioKeywords: z.array(z.string()).optional(),
   minFollowers: z.number().int().nonnegative().optional(),
   maxFollowers: z.number().int().nonnegative().optional(),

@@ -1,47 +1,38 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useId, useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router";
+import { useEffect, useId, useState, type FormEvent } from "react";
+import { Link, useNavigate, useParams } from "react-router";
 import { getAccount } from "../api/accounts";
 import { ApiError } from "../api/client";
-import { listLeads, type ListLeadsFilters } from "../api/leads";
-import { cancelScrape, deleteScrape, getScrape } from "../api/scrapes";
-import type { Lead } from "../api/types";
+import { createLeadList } from "../api/leadLists";
+import { bulkDeleteLeads } from "../api/leads";
+import { cancelScrape, deleteScrape, getScrape, listScrapeLeads, updateScrapeResultFilter } from "../api/scrapes";
+import type { Lead, ScrapeResultFilter } from "../api/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
 import { LeadDetailDrawer } from "../components/LeadDetailDrawer";
 import { LeadsTable } from "../components/LeadsTable";
+import { Modal } from "../components/Modal";
 import { SkeletonRows } from "../components/Skeleton";
 import { StatusPill } from "../components/StatusPill";
 import { formatDateTime, formatNumber } from "../lib/format";
 
 const LEADS_PAGE_SIZE = 50;
-type ScrapeLeadFilters = Pick<ListLeadsFilters, "minFollowers" | "maxFollowers" | "location">;
-
-function parseFollowerFilterParam(value: string | null): number | undefined {
-  if (value === null || value === "") return undefined;
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
-}
 
 export function ScrapeJobDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const initialMinFollowers = parseFollowerFilterParam(searchParams.get("minFollowers"));
-  const initialMaxFollowers = parseFollowerFilterParam(searchParams.get("maxFollowers"));
-  const initialLocation = searchParams.get("location")?.trim().slice(0, 200) || undefined;
   const [leadsPage, setLeadsPage] = useState(1);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(() => new Set());
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [minFollowers, setMinFollowers] = useState(() => initialMinFollowers?.toString() ?? "");
-  const [maxFollowers, setMaxFollowers] = useState(() => initialMaxFollowers?.toString() ?? "");
-  const [location, setLocation] = useState(() => initialLocation ?? "");
-  const [leadFilters, setLeadFilters] = useState<ScrapeLeadFilters>(() => ({
-    ...(initialMinFollowers !== undefined ? { minFollowers: initialMinFollowers } : {}),
-    ...(initialMaxFollowers !== undefined ? { maxFollowers: initialMaxFollowers } : {}),
-    ...(initialLocation ? { location: initialLocation } : {}),
-  }));
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [showCreateList, setShowCreateList] = useState(false);
+  const [listName, setListName] = useState("");
+  const [minFollowers, setMinFollowers] = useState("");
+  const [maxFollowers, setMaxFollowers] = useState("");
+  const [location, setLocation] = useState("");
+  const [initializedFilterJobId, setInitializedFilterJobId] = useState<string | null>(null);
   const [filterError, setFilterError] = useState<string | null>(null);
   const idPrefix = useId();
 
@@ -56,30 +47,62 @@ export function ScrapeJobDetail() {
 
   const job = jobQuery.data?.scrapeJob;
 
+  useEffect(() => {
+    if (!job || initializedFilterJobId === job.id) return;
+    setMinFollowers(job.resultFilterDefinition.minFollowers?.toString() ?? "");
+    setMaxFollowers(job.resultFilterDefinition.maxFollowers?.toString() ?? "");
+    setLocation(job.resultFilterDefinition.location ?? "");
+    setInitializedFilterJobId(job.id);
+  }, [initializedFilterJobId, job]);
+
   const accountQuery = useQuery({
     queryKey: ["accounts", job?.xAccountId],
     queryFn: () => getAccount(job!.xAccountId),
     enabled: !!job,
   });
 
-  // Leads aren't stored per-job (upsertLeads keys rows by handle and overwrites source_type/
-  // source_ref on every re-scrape), so this shows leads currently on file matching this job's
-  // target rather than only the ones this exact run produced — the closest available
-  // approximation without a scrape_job_id column on `leads`.
   const leadsQuery = useQuery({
-    queryKey: ["leads", "byJob", job?.sourceType, job?.sourceRef, leadFilters, leadsPage],
-    queryFn: () =>
-      listLeads({
-        sourceType: job!.sourceType,
-        sourceRef: job!.sourceRef,
-        ...leadFilters,
-        page: leadsPage,
-        pageSize: LEADS_PAGE_SIZE,
-      }),
+    queryKey: ["scrapes", id, "leads", job?.status, job?.resultFilterDefinition, leadsPage],
+    queryFn: () => listScrapeLeads(id!, leadsPage, LEADS_PAGE_SIZE),
     enabled: !!job,
+    refetchInterval: job?.status === "queued" || job?.status === "running" ? 5000 : false,
   });
   const leads = leadsQuery.data?.leads ?? [];
-  const hasLeadFilters = Object.keys(leadFilters).length > 0;
+  const hasLeadFilters = Object.keys(job?.resultFilterDefinition ?? {}).length > 0;
+  const exactMembershipAvailable = leadsQuery.data?.exactMembershipAvailable ?? job?.tracksExactLeads ?? false;
+  const matchedLeadCount = leadsQuery.data?.total ?? 0;
+
+  const filterMutation = useMutation({
+    mutationFn: (filter: ScrapeResultFilter) => updateScrapeResultFilter(id!, filter),
+    onSuccess: ({ scrapeJob }) => {
+      queryClient.setQueryData(["scrapes", id], { scrapeJob });
+      queryClient.invalidateQueries({ queryKey: ["scrapes", id, "leads"] });
+      queryClient.invalidateQueries({ queryKey: ["scrapes"] });
+      setLeadsPage(1);
+    },
+  });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: () => bulkDeleteLeads([...selectedLeadIds]),
+    onSuccess: () => {
+      setSelectedLeadIds(new Set());
+      setConfirmBulkDelete(false);
+      setSelectedLead(null);
+      queryClient.invalidateQueries({ queryKey: ["scrapes", id, "leads"] });
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
+      queryClient.invalidateQueries({ queryKey: ["leadLists"] });
+    },
+  });
+
+  const createListMutation = useMutation({
+    mutationFn: () => createLeadList(listName.trim(), { leadIds: [...selectedLeadIds] }),
+    onSuccess: () => {
+      setShowCreateList(false);
+      setListName("");
+      setSelectedLeadIds(new Set());
+      queryClient.invalidateQueries({ queryKey: ["leadLists"] });
+    },
+  });
 
   function applyLeadFilters(event: FormEvent) {
     event.preventDefault();
@@ -101,28 +124,40 @@ export function ScrapeJobDetail() {
     }
 
     const locationFilter = location.trim();
-    const nextFilters: ScrapeLeadFilters = {
+    const nextFilters: ScrapeResultFilter = {
       ...(min !== undefined ? { minFollowers: min } : {}),
       ...(max !== undefined ? { maxFollowers: max } : {}),
       ...(locationFilter ? { location: locationFilter } : {}),
     };
-    const nextSearchParams = new URLSearchParams();
-    if (min !== undefined) nextSearchParams.set("minFollowers", String(min));
-    if (max !== undefined) nextSearchParams.set("maxFollowers", String(max));
-    if (locationFilter) nextSearchParams.set("location", locationFilter);
-    setLeadFilters(nextFilters);
-    setSearchParams(nextSearchParams, { replace: true });
-    setLeadsPage(1);
+    filterMutation.mutate(nextFilters);
   }
 
   function clearLeadFilters() {
     setMinFollowers("");
     setMaxFollowers("");
     setLocation("");
-    setLeadFilters({});
-    setSearchParams(new URLSearchParams(), { replace: true });
     setFilterError(null);
-    setLeadsPage(1);
+    filterMutation.mutate({});
+  }
+
+  function setLeadSelected(leadId: string, selected: boolean) {
+    setSelectedLeadIds((current) => {
+      const next = new Set(current);
+      if (selected) next.add(leadId);
+      else next.delete(leadId);
+      return next;
+    });
+  }
+
+  function selectAllVisible(selected: boolean) {
+    setSelectedLeadIds((current) => {
+      const next = new Set(current);
+      for (const lead of leads) {
+        if (selected) next.add(lead.id);
+        else next.delete(lead.id);
+      }
+      return next;
+    });
   }
 
   const cancelMutation = useMutation({
@@ -237,10 +272,15 @@ export function ScrapeJobDetail() {
         <div>
           <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Leads</h2>
           <p className="text-xs text-zinc-500">
-            Leads currently on file for this {job.sourceType === "followers" ? "account" : "target"} — if it's been
-            scraped again since this job ran, that later data shows here too.
+            Only leads collected by this exact scrape are shown here. Re-running the same target creates separate membership.
           </p>
         </div>
+
+        {!exactMembershipAvailable && (
+          <div className="rounded-md border border-status-warning-bg bg-status-warning-bg p-3 text-sm text-status-warning">
+            This scrape predates exact lead tracking. Run a new scrape to get an exact, selectable result set.
+          </div>
+        )}
 
         <form onSubmit={applyLeadFilters} className="rounded-lg border p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
@@ -252,7 +292,8 @@ export function ScrapeJobDetail() {
               <button
                 type="button"
                 onClick={clearLeadFilters}
-                className="text-xs font-medium text-accent-text hover:underline"
+                disabled={job.status === "queued" || job.status === "running"}
+                className="text-xs font-medium text-accent-text hover:underline disabled:opacity-40"
               >
                 Clear filters
               </button>
@@ -311,21 +352,63 @@ export function ScrapeJobDetail() {
             </p>
             <button
               type="submit"
-              className="shrink-0 rounded-md bg-accent px-4 py-2 text-xs font-medium text-white hover:opacity-90"
+              disabled={
+                filterMutation.isPending ||
+                !exactMembershipAvailable ||
+                job.status === "queued" ||
+                job.status === "running"
+              }
+              className="shrink-0 rounded-md bg-accent px-4 py-2 text-xs font-medium text-white hover:opacity-90 disabled:opacity-40"
             >
-              Apply filters
+              {filterMutation.isPending ? "Applying…" : "Apply filters"}
             </button>
           </div>
           {filterError && <p className="mt-2 text-xs text-status-danger">{filterError}</p>}
+          {filterMutation.error instanceof ApiError && (
+            <p className="mt-2 text-xs text-status-danger">{filterMutation.error.message}</p>
+          )}
         </form>
 
         {leadsQuery.isLoading ? (
           <SkeletonRows rows={5} cols={7} />
+        ) : !exactMembershipAvailable ? (
+          <></>
         ) : leads.length === 0 ? (
-          <EmptyState title={hasLeadFilters ? "No leads match these filters" : "No leads on file for this target yet"} />
+          <EmptyState title={hasLeadFilters ? "No leads from this scrape match these filters" : "No leads collected by this scrape yet"} />
         ) : (
           <>
-            <LeadsTable leads={leads} onRowClick={setSelectedLead} />
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border px-3 py-2">
+              <span className="text-sm text-zinc-500">
+                {selectedLeadIds.size > 0
+                  ? `${selectedLeadIds.size} selected`
+                  : `${formatNumber(matchedLeadCount)} matching lead${matchedLeadCount === 1 ? "" : "s"}`}
+              </span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={selectedLeadIds.size === 0}
+                  onClick={() => setShowCreateList(true)}
+                  className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-zinc-50 disabled:opacity-40 dark:hover:bg-zinc-800"
+                >
+                  Create lead list
+                </button>
+                <button
+                  type="button"
+                  disabled={selectedLeadIds.size === 0}
+                  onClick={() => setConfirmBulkDelete(true)}
+                  className="rounded-md border border-status-danger-bg px-3 py-1.5 text-xs font-medium text-status-danger hover:bg-status-danger-bg disabled:opacity-40"
+                >
+                  Delete selected
+                </button>
+              </div>
+            </div>
+            <LeadsTable
+              leads={leads}
+              onRowClick={setSelectedLead}
+              selectedLeadIds={selectedLeadIds}
+              onSelectionChange={setLeadSelected}
+              onSelectAll={selectAllVisible}
+            />
             <div className="flex items-center justify-between text-sm text-zinc-500">
               <span>Page {leadsPage}</span>
               <div className="flex gap-2">
@@ -339,7 +422,7 @@ export function ScrapeJobDetail() {
                 </button>
                 <button
                   type="button"
-                  disabled={leads.length < LEADS_PAGE_SIZE}
+                  disabled={leadsPage * LEADS_PAGE_SIZE >= matchedLeadCount}
                   onClick={() => setLeadsPage((p) => p + 1)}
                   className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-zinc-50 disabled:opacity-40 dark:hover:bg-zinc-800"
                 >
@@ -352,6 +435,66 @@ export function ScrapeJobDetail() {
       </div>
 
       {selectedLead && <LeadDetailDrawer lead={selectedLead} onClose={() => setSelectedLead(null)} />}
+
+      {showCreateList && (
+        <Modal title="Create lead list" onClose={() => setShowCreateList(false)}>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (listName.trim()) createListMutation.mutate();
+            }}
+            className="space-y-4"
+          >
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              Create a static list from the {selectedLeadIds.size} selected lead{selectedLeadIds.size === 1 ? "" : "s"}.
+            </p>
+            <div>
+              <label htmlFor={`${idPrefix}-list-name`} className="mb-1 block text-sm font-medium">
+                List name
+              </label>
+              <input
+                id={`${idPrefix}-list-name`}
+                autoFocus
+                required
+                maxLength={100}
+                value={listName}
+                onChange={(event) => setListName(event.target.value)}
+                placeholder="e.g. Qualified Ghana leads"
+                className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+              />
+            </div>
+            {createListMutation.error instanceof ApiError && (
+              <p className="text-sm text-status-danger">{createListMutation.error.message}</p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowCreateList(false)}
+                className="rounded-md border px-3 py-1.5 text-sm font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!listName.trim() || createListMutation.isPending}
+                className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+              >
+                {createListMutation.isPending ? "Creating…" : "Create list"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {confirmBulkDelete && (
+        <ConfirmDialog
+          title={`Delete ${selectedLeadIds.size} selected leads?`}
+          message="This permanently deletes the selected leads from your saved leads, every scrape result, and every lead list."
+          confirmLabel={bulkDeleteMutation.isPending ? "Deleting…" : "Delete selected"}
+          onConfirm={() => bulkDeleteMutation.mutate()}
+          onCancel={() => setConfirmBulkDelete(false)}
+        />
+      )}
 
       {confirmDelete && (
         <ConfirmDialog
