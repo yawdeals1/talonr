@@ -318,6 +318,7 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 | GET | /scrapes | auth | List own jobs, filterable by `status`/`xAccountId` |
 | GET | /scrapes/:id | auth | Job detail/status |
 | POST | /scrapes/:id/cancel | auth | Removes from queue if still waiting/delayed; best-effort if already running |
+| DELETE | /scrapes/:id | auth | Deletes a non-running scrape record/queue entry; collected leads remain saved |
 | GET | /leads | auth | Paginated own leads, filterable by `handle`/`sourceType` |
 | GET | /leads/:id | auth | Lead detail |
 | GET | /lead-lists | auth | List own saved filters |

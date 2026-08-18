@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ScrapeJob, XAccount } from "../../db/schema.js";
-import { NotFoundError } from "../../lib/errors.js";
-import { cancelScrapeJob, createScrapeJob, getScrapeJob } from "./scrapes.service.js";
+import { NotFoundError, ValidationError } from "../../lib/errors.js";
+import { cancelScrapeJob, createScrapeJob, deleteScrapeJob, getScrapeJob } from "./scrapes.service.js";
 
 // Compensating control for the lack of database-level tenant isolation (see
 // accounts.service.test.ts for the full rationale) — this file covers scrapes.service.ts's own
@@ -11,6 +11,7 @@ import { cancelScrapeJob, createScrapeJob, getScrapeJob } from "./scrapes.servic
 const studioGet = vi.fn();
 const studioInsert = vi.fn();
 const studioUpdate = vi.fn();
+const studioDelete = vi.fn();
 const queueAdd = vi.fn();
 const queueGetJob = vi.fn();
 
@@ -19,6 +20,7 @@ vi.mock("../../db/studio-client.js", () => ({
   studioListSorted: vi.fn(),
   studioInsert: (...args: unknown[]) => studioInsert(...args),
   studioUpdate: (...args: unknown[]) => studioUpdate(...args),
+  studioDelete: (...args: unknown[]) => studioDelete(...args),
 }));
 
 vi.mock("../../queue/queues.js", () => ({
@@ -129,5 +131,31 @@ describe("scrapes.service ownership isolation", () => {
     await expect(cancelScrapeJob(ATTACKER, JOB_ID)).rejects.toBeInstanceOf(NotFoundError);
     expect(queueGetJob).not.toHaveBeenCalled();
     expect(studioUpdate).not.toHaveBeenCalled();
+  });
+
+  it("deleteScrapeJob: a different user cannot delete someone else's job", async () => {
+    studioGet.mockResolvedValue(ownedJob);
+    await expect(deleteScrapeJob(ATTACKER, JOB_ID)).rejects.toBeInstanceOf(NotFoundError);
+    expect(queueGetJob).not.toHaveBeenCalled();
+    expect(studioDelete).not.toHaveBeenCalled();
+  });
+
+  it("deleteScrapeJob: refuses to delete a running job", async () => {
+    studioGet.mockResolvedValue({ ...ownedJob, status: "running" });
+    await expect(deleteScrapeJob(OWNER, JOB_ID)).rejects.toBeInstanceOf(ValidationError);
+    expect(queueGetJob).not.toHaveBeenCalled();
+    expect(studioDelete).not.toHaveBeenCalled();
+  });
+
+  it("deleteScrapeJob: removes a terminal queue job and the owner's scrape record", async () => {
+    const getState = vi.fn().mockResolvedValue("completed");
+    const remove = vi.fn().mockResolvedValue(undefined);
+    studioGet.mockResolvedValue({ ...ownedJob, status: "completed" });
+    queueGetJob.mockResolvedValue({ getState, remove });
+
+    await deleteScrapeJob(OWNER, JOB_ID);
+
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(studioDelete).toHaveBeenCalledWith("scrape_jobs", JOB_ID);
   });
 });

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { ValidationError } from "../../lib/errors.js";
 import { X_HANDLE_PATTERN, X_TWEET_URL_PATTERN } from "../../scraper/types.js";
 import type { AuthedRequest } from "../auth/auth.middleware.js";
-import { cancelScrapeJob, createScrapeJob, getScrapeJob, listScrapeJobs } from "./scrapes.service.js";
+import { cancelScrapeJob, createScrapeJob, deleteScrapeJob, getScrapeJob, listScrapeJobs } from "./scrapes.service.js";
 
 // sourceRef ends up in the worker's Playwright page.goto() (see scraper/sources/*.source.ts) — for
 // "followers"/"engagers" it must be constrained to X's own handle/tweet-URL shape, or a user could
@@ -70,4 +70,9 @@ export async function get(req: AuthedRequest, res: Response) {
 
 export async function cancel(req: AuthedRequest, res: Response) {
   res.json({ scrapeJob: await cancelScrapeJob(req.user!.id, req.params.id) });
+}
+
+export async function remove(req: AuthedRequest, res: Response) {
+  await deleteScrapeJob(req.user!.id, req.params.id);
+  res.status(204).send();
 }

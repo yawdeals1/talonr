@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { getAccount } from "../api/accounts";
 import { ApiError } from "../api/client";
 import { listLeads } from "../api/leads";
-import { cancelScrape, getScrape } from "../api/scrapes";
+import { cancelScrape, deleteScrape, getScrape } from "../api/scrapes";
 import type { Lead } from "../api/types";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
 import { LeadDetailDrawer } from "../components/LeadDetailDrawer";
 import { LeadsTable } from "../components/LeadsTable";
@@ -17,9 +18,11 @@ const LEADS_PAGE_SIZE = 50;
 
 export function ScrapeJobDetail() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [leadsPage, setLeadsPage] = useState(1);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const jobQuery = useQuery({
     queryKey: ["scrapes", id],
@@ -54,6 +57,14 @@ export function ScrapeJobDetail() {
     mutationFn: () => cancelScrape(id!),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["scrapes"] });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteScrape(id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["scrapes"] });
+      navigate("/scrapes");
     },
   });
 
@@ -135,6 +146,21 @@ export function ScrapeJobDetail() {
         </p>
       )}
 
+      {job.status !== "running" && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setConfirmDelete(true)}
+            className="rounded-md border px-4 py-2 text-sm font-medium text-status-danger hover:bg-status-danger-bg"
+          >
+            Delete scrape
+          </button>
+          {deleteMutation.error instanceof ApiError && (
+            <p className="mt-2 text-sm text-status-danger">{deleteMutation.error.message}</p>
+          )}
+        </div>
+      )}
+
       <div className="space-y-3">
         <div>
           <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Leads</h2>
@@ -177,6 +203,15 @@ export function ScrapeJobDetail() {
       </div>
 
       {selectedLead && <LeadDetailDrawer lead={selectedLead} onClose={() => setSelectedLead(null)} />}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete scrape?"
+          message="This permanently removes the scrape record. Leads already collected by it will remain saved."
+          onConfirm={() => deleteMutation.mutate()}
+          onCancel={() => setConfirmDelete(false)}
+        />
+      )}
     </div>
   );
 }

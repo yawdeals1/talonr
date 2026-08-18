@@ -1,9 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { listAccounts } from "../api/accounts";
-import { listScrapes } from "../api/scrapes";
-import type { ScrapeJobStatus } from "../api/types";
+import { deleteScrape, listScrapes } from "../api/scrapes";
+import type { ScrapeJob, ScrapeJobStatus } from "../api/types";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
 import { SkeletonRows } from "../components/Skeleton";
 import { StatusPill } from "../components/StatusPill";
@@ -13,8 +14,10 @@ const STATUS_OPTIONS: ScrapeJobStatus[] = ["queued", "running", "completed", "fa
 
 export function ScrapeJobs() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [status, setStatus] = useState<ScrapeJobStatus | "">("");
   const [xAccountId, setXAccountId] = useState("");
+  const [deleting, setDeleting] = useState<ScrapeJob | null>(null);
 
   const accountsQuery = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
   const scrapesQuery = useQuery({
@@ -30,6 +33,14 @@ export function ScrapeJobs() {
   const accountById = new Map(accounts.map((a) => [a.id, a]));
   const jobs = scrapesQuery.data?.scrapeJobs ?? [];
   const hasFilters = status || xAccountId;
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteScrape,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["scrapes"] });
+      setDeleting(null);
+    },
+  });
 
   return (
     <div className="space-y-4">
@@ -112,6 +123,7 @@ export function ScrapeJobs() {
                 <th className="px-3 py-2 font-medium">Leads</th>
                 <th className="px-3 py-2 font-medium">Started</th>
                 <th className="px-3 py-2 font-medium">Finished</th>
+                <th className="px-3 py-2 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -138,11 +150,31 @@ export function ScrapeJobs() {
                   <td className="px-3 py-2 text-xs text-zinc-500">
                     {job.finishedAt ? formatRelative(job.finishedAt) : "—"}
                   </td>
+                  <td className="px-3 py-2 text-right" onClick={(event) => event.stopPropagation()}>
+                    <button
+                      type="button"
+                      onClick={() => setDeleting(job)}
+                      disabled={job.status === "running"}
+                      title={job.status === "running" ? "A running scrape cannot be deleted" : "Delete scrape"}
+                      className="rounded-md border px-2.5 py-1 text-xs font-medium text-status-danger hover:bg-status-danger-bg disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Delete
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+
+      {deleting && (
+        <ConfirmDialog
+          title="Delete scrape?"
+          message="This permanently removes the scrape record. Leads already collected by it will remain saved."
+          onConfirm={() => deleteMutation.mutate(deleting.id)}
+          onCancel={() => setDeleting(null)}
+        />
       )}
     </div>
   );

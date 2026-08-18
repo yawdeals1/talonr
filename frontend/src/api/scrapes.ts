@@ -29,3 +29,7 @@ export function getScrape(id: string): Promise<{ scrapeJob: ScrapeJob }> {
 export function cancelScrape(id: string): Promise<{ scrapeJob: ScrapeJob }> {
   return apiFetch(`/scrapes/${id}/cancel`, { method: "POST" });
 }
+
+export function deleteScrape(id: string): Promise<void> {
+  return apiFetch(`/scrapes/${id}`, { method: "DELETE" });
+}

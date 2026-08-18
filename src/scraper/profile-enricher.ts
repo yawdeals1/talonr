@@ -42,27 +42,43 @@ export function parseFollowerCount(value: string | null): number | null {
   return Math.round(number * multiplier);
 }
 
-async function extractProfileDetails(page: Page): Promise<ProfileDetails> {
-  return page.evaluate(() => {
-    const followerLink = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]')).find((anchor) => {
+async function extractProfileDetails(page: Page, handle: string): Promise<ProfileDetails> {
+  return page.evaluate((profileHandle) => {
+    const primaryColumn = document.querySelector('[data-testid="primaryColumn"]') ?? document.querySelector("main");
+    if (!primaryColumn) {
+      return {
+        displayName: null,
+        bio: null,
+        followersText: null,
+        location: null,
+        verified: false,
+        profileImage: null,
+      };
+    }
+
+    const userName = primaryColumn.querySelector('[data-testid="UserName"]');
+    const followerLink = Array.from(primaryColumn.querySelectorAll<HTMLAnchorElement>('a[href]')).find((anchor) => {
       const path = new URL(anchor.href).pathname.replace(/\/+$/, "");
       return path.endsWith("/followers") || path.endsWith("/verified_followers");
     });
-    const displayName = document.querySelector('[data-testid="UserName"] span')?.textContent?.trim() || null;
-    const bio = document.querySelector('[data-testid="UserDescription"]')?.textContent?.trim() || null;
-    const location = document.querySelector('[data-testid="UserLocation"]')?.textContent?.trim() || null;
+    const displayName = userName?.querySelector("span")?.textContent?.trim() || null;
+    const bio = primaryColumn.querySelector('[data-testid="UserDescription"]')?.textContent?.trim() || null;
+    const location = primaryColumn.querySelector('[data-testid="UserLocation"]')?.textContent?.trim() || null;
+    const avatarContainer = Array.from(
+      primaryColumn.querySelectorAll<HTMLElement>('[data-testid^="UserAvatar-Container-"]')
+    ).find((element) => element.dataset.testid?.slice("UserAvatar-Container-".length).toLowerCase() === profileHandle.toLowerCase());
     const profileImage =
-      (document.querySelector('img[src*="profile_images"]') as HTMLImageElement | null)?.src ?? null;
+      (avatarContainer?.querySelector('img[src*="profile_images"]') as HTMLImageElement | null)?.src ?? null;
 
     return {
       displayName,
       bio,
       followersText: followerLink?.textContent?.trim() ?? followerLink?.getAttribute("aria-label") ?? null,
       location,
-      verified: Boolean(document.querySelector('svg[data-testid="icon-verified"]')),
+      verified: Boolean(userName?.querySelector('svg[data-testid="icon-verified"]')),
       profileImage,
     };
-  });
+  }, handle);
 }
 
 /**
@@ -93,7 +109,7 @@ export async function enrichLeadsFromProfiles(
         await page.waitForSelector('[data-testid="UserName"]', { timeout: 15_000 });
         await checkHealth(page);
 
-        const details = await extractProfileDetails(page);
+        const details = await extractProfileDetails(page, lead.handle);
         enriched.push({
           ...lead,
           displayName: details.displayName ?? lead.displayName,

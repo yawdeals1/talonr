@@ -1,6 +1,6 @@
 import { env } from "../../config/env.js";
 import { normalizeStudioSourceType, toStudioSourceType } from "../../db/source-type-compat.js";
-import { studioGet, studioInsert, studioListSorted, studioUpdate } from "../../db/studio-client.js";
+import { studioDelete, studioGet, studioInsert, studioListSorted, studioUpdate } from "../../db/studio-client.js";
 import type { EngagementType, ScrapeJob, XAccount } from "../../db/schema.js";
 import { NotFoundError, ValidationError } from "../../lib/errors.js";
 import { scrapeQueue } from "../../queue/queues.js";
@@ -97,4 +97,22 @@ export async function cancelScrapeJob(userId: string, id: string) {
 
   // Already running/terminal: best-effort only, can't hard-kill an in-flight Playwright run.
   return job;
+}
+
+export async function deleteScrapeJob(userId: string, id: string): Promise<void> {
+  const job = await getScrapeJob(userId, id);
+  if (job.status === "running") {
+    throw new ValidationError("A running scrape cannot be deleted");
+  }
+
+  const bullJob = await scrapeQueue.getJob(id);
+  if (bullJob) {
+    const state = await bullJob.getState();
+    if (state === "active") {
+      throw new ValidationError("A running scrape cannot be deleted");
+    }
+    await bullJob.remove();
+  }
+
+  await studioDelete("scrape_jobs", id);
 }

@@ -5,7 +5,7 @@ import { rateLimit } from "../../lib/rate-limit.js";
 import { requireUuidParam } from "../../lib/validate-params.js";
 import type { AuthedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
-import { cancel, create, get, list } from "./scrapes.controller.js";
+import { cancel, create, get, list, remove } from "./scrapes.controller.js";
 
 export const scrapesRouter = Router();
 
@@ -25,3 +25,4 @@ scrapesRouter.post("/", createLimiter, asyncHandler(create));
 scrapesRouter.get("/", asyncHandler(list));
 scrapesRouter.get("/:id", requireUuidParam("id"), asyncHandler(get));
 scrapesRouter.post("/:id/cancel", requireUuidParam("id"), asyncHandler(cancel));
+scrapesRouter.delete("/:id", requireUuidParam("id"), asyncHandler(remove));
