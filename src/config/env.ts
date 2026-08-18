@@ -32,6 +32,10 @@ const envSchema = z.object({
   SCRAPE_CAP_LEADS_DEFAULT: z.coerce.number().int().positive().default(150),
   SCROLL_DELAY_MIN_MS: z.coerce.number().int().positive().default(1500),
   SCROLL_DELAY_MAX_MS: z.coerce.number().int().positive().default(4000),
+  // Profile visits provide follower count/location/bio after list collection. Kept separate from
+  // scroll timing because each visit is a heavier X request and should remain deliberately slow.
+  PROFILE_DELAY_MIN_MS: z.coerce.number().int().positive().default(2500),
+  PROFILE_DELAY_MAX_MS: z.coerce.number().int().positive().default(6000),
 });
 
 const parsed = envSchema.safeParse(process.env);

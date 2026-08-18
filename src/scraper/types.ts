@@ -12,8 +12,8 @@ export interface RawLead {
   handle: string;
   displayName: string | null;
   bio: string | null;
-  // Rarely populated from list-view scraping — X's search/followers/likers cells don't expose
-  // follower counts without visiting the profile page. Left null when unavailable.
+  // List views leave these null; the worker's profile-enrichment phase fills them before upsert.
+  // They stay nullable because profiles can omit a location or be temporarily unavailable.
   followers: number | null;
   location: string | null;
   verified: boolean;

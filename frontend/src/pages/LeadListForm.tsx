@@ -151,8 +151,8 @@ export function LeadListForm() {
             className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
           />
           <p className="mt-1 text-xs text-zinc-500">
-            X doesn't expose location on search/followers/engager result cards, so this field is
-            never populated by scraping today — a location filter here won't match any leads yet.
+            Location is captured from each public profile during the scrape. Accounts that do not
+            publish a location will remain unmatched.
           </p>
         </div>
 

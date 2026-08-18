@@ -80,6 +80,7 @@ src/
 │   ├── browser.ts                    # launches a Playwright context from decrypted storageState + proxy
 │   ├── session-store.ts              # encrypt/decrypt storageState + proxy config (wraps lib/crypto)
 │   ├── scroll-collector.ts           # shared scroll-and-collect engine (dedupe, cap, random delay)
+│   ├── profile-enricher.ts           # sequential profile visits for bio/followers/location/avatar
 │   ├── detectors.ts                  # checkHealth(): captcha / login-challenge / rate-limit detection
 │   ├── parsers/user-cell.parser.ts   # shared DOM extractor (X reuses UserCell across all 3 views)
 │   └── sources/{search,followers,repliers,retweeters}.source.ts   # per-source buildUrl/waitForReady;
@@ -148,11 +149,11 @@ against a large multi-tenant dataset.
 - **activity_log**: id, user_id (FK), action (varchar), metadata (jsonb), created_at — powers the
   admin activity feed via `logActivity(userId, action, metadata)`
 
-**Caveat**: X's list-view cells (search/followers/repliers/retweeters) don't expose follower count without
-visiting the profile page, so `leads.followers` is frequently `NULL` from scraping alone.
-`filter-query-builder.ts` excludes NULL-follower rows from min/max-follower filters rather than
-erroring. A profile-visit enrichment pass would multiply request volume against X and is
-deliberately out of scope.
+**Profile data**: X's list-view cells don't expose follower count or location, so every scrape now
+visits each deduplicated lead's public profile sequentially before upsert and merges bio, follower
+count, location, verification, and avatar into the same job. The profile delay is conservative and
+configurable. `followers`/`location` remain nullable because profiles can omit them or be unavailable;
+`filter-query-builder.ts` excludes NULL-follower rows from min/max-follower filters.
 
 ## Auth (`src/modules/auth/`)
 
@@ -278,7 +279,10 @@ rows still typecheck, and is rejected at job-creation time for new jobs
 `goto` → `checkHealth` → `waitForReady` → loop until `capLeads` reached or 4 consecutive stagnant
 scroll rounds → each round: `checkHealth`, `extractVisibleItems`, dedupe into an in-memory `Map`
 keyed by lowercased handle, `page.mouse.wheel` scroll, random delay from
-`SCROLL_DELAY_MIN_MS`/`SCROLL_DELAY_MAX_MS`. `detectors.ts#checkHealth` checks URL patterns
+`SCROLL_DELAY_MIN_MS`/`SCROLL_DELAY_MAX_MS`. After collection, `profile-enricher.ts` visits every
+unique profile sequentially using `PROFILE_DELAY_MIN_MS`/`PROFILE_DELAY_MAX_MS`, merges bio,
+followers, location, verification, and avatar, then the worker upserts the complete leads.
+`detectors.ts#checkHealth` checks URL patterns
 (login/challenge/lockdown redirects), a captcha iframe selector, and rate-limit text on the page;
 `watchForRateLimitResponses` also listens for HTTP 429s. Source `sourceRef` semantics: `search` =
 raw keyword/query string, `followers` = target handle (without `@`), `engagers` = full tweet URL.
@@ -355,7 +359,8 @@ avoiding a same-host NAT hairpin round trip), `SESSION_ENCRYPTION_KEY` (32 bytes
 Deploro PAT — `deploro token create <name> --project talonr`), `PORT`, `NODE_ENV`, `COOKIE_SECURE`,
 `ALLOWED_ORIGIN`, `WORKER_CONCURRENCY`, `DEFAULT_DAILY_SCRAPE_LIMIT`,
 `DEFAULT_MAX_CONCURRENCY_PER_ACCOUNT`, `SCRAPE_CAP_LEADS_DEFAULT`, `SCROLL_DELAY_MIN_MS`,
-`SCROLL_DELAY_MAX_MS`. All validated at boot by `src/config/env.ts` (zod) — the process throws
+`SCROLL_DELAY_MAX_MS`, `PROFILE_DELAY_MIN_MS`, `PROFILE_DELAY_MAX_MS`. All validated at boot by
+`src/config/env.ts` (zod) — the process throws
 immediately on an invalid/missing var rather than failing later. No `DATABASE_URL` — there is no
 direct Postgres connection anywhere in this app.
 
@@ -402,8 +407,6 @@ wrapper around the same file.
 
 ## Known limitations / non-goals
 
-- No follower-count enrichment pass (would multiply scrape volume against X) — `leads.followers`
-  is frequently null from list-view scraping.
 - No admin impersonation/session-switching — admin routes are strictly read-only cross-user views.
 - No refresh-token rotation — Deploro session tokens expire after 7 days, re-login after that.
 - `POST /scrapes/:id/cancel` can't hard-kill an in-flight Playwright run; it only removes

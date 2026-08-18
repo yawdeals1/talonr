@@ -6,6 +6,7 @@ import { logger } from "../../lib/logger.js";
 import { logActivity } from "../../modules/activity/activity.service.js";
 import { upsertLeads } from "../../modules/leads/leads.service.js";
 import { closeScrapeSession, launchScrapeSession } from "../../scraper/browser.js";
+import { enrichLeadsFromProfiles } from "../../scraper/profile-enricher.js";
 import { decryptProxy, decryptSession } from "../../scraper/session-store.js";
 import { scrollAndCollect } from "../../scraper/scroll-collector.js";
 import { followersSource } from "../../scraper/sources/followers.source.js";
@@ -88,7 +89,11 @@ async function runScrape(data: ScrapeJobData): Promise<{ leadsFound: number }> {
       rawLeads = await scrollAndCollect(SOURCES[data.sourceType], collectOpts);
     }
 
-    const leadsFound = await upsertLeads(data.userId, data.sourceType, data.sourceRef, rawLeads);
+    const enrichedLeads = await enrichLeadsFromProfiles(page, rawLeads, {
+      minDelayMs: env.PROFILE_DELAY_MIN_MS,
+      maxDelayMs: env.PROFILE_DELAY_MAX_MS,
+    });
+    const leadsFound = await upsertLeads(data.userId, data.sourceType, data.sourceRef, enrichedLeads);
     return { leadsFound };
   } finally {
     await closeScrapeSession(session);
