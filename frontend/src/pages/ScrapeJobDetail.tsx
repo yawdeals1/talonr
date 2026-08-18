@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { getAccount } from "../api/accounts";
 import { ApiError } from "../api/client";
 import { listLeads, type ListLeadsFilters } from "../api/leads";
@@ -17,17 +17,31 @@ import { formatDateTime, formatNumber } from "../lib/format";
 const LEADS_PAGE_SIZE = 50;
 type ScrapeLeadFilters = Pick<ListLeadsFilters, "minFollowers" | "maxFollowers" | "location">;
 
+function parseFollowerFilterParam(value: string | null): number | undefined {
+  if (value === null || value === "") return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
 export function ScrapeJobDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialMinFollowers = parseFollowerFilterParam(searchParams.get("minFollowers"));
+  const initialMaxFollowers = parseFollowerFilterParam(searchParams.get("maxFollowers"));
+  const initialLocation = searchParams.get("location")?.trim().slice(0, 200) || undefined;
   const [leadsPage, setLeadsPage] = useState(1);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [minFollowers, setMinFollowers] = useState("");
-  const [maxFollowers, setMaxFollowers] = useState("");
-  const [location, setLocation] = useState("");
-  const [leadFilters, setLeadFilters] = useState<ScrapeLeadFilters>({});
+  const [minFollowers, setMinFollowers] = useState(() => initialMinFollowers?.toString() ?? "");
+  const [maxFollowers, setMaxFollowers] = useState(() => initialMaxFollowers?.toString() ?? "");
+  const [location, setLocation] = useState(() => initialLocation ?? "");
+  const [leadFilters, setLeadFilters] = useState<ScrapeLeadFilters>(() => ({
+    ...(initialMinFollowers !== undefined ? { minFollowers: initialMinFollowers } : {}),
+    ...(initialMaxFollowers !== undefined ? { maxFollowers: initialMaxFollowers } : {}),
+    ...(initialLocation ? { location: initialLocation } : {}),
+  }));
   const [filterError, setFilterError] = useState<string | null>(null);
   const idPrefix = useId();
 
@@ -87,11 +101,17 @@ export function ScrapeJobDetail() {
     }
 
     const locationFilter = location.trim();
-    setLeadFilters({
+    const nextFilters: ScrapeLeadFilters = {
       ...(min !== undefined ? { minFollowers: min } : {}),
       ...(max !== undefined ? { maxFollowers: max } : {}),
       ...(locationFilter ? { location: locationFilter } : {}),
-    });
+    };
+    const nextSearchParams = new URLSearchParams();
+    if (min !== undefined) nextSearchParams.set("minFollowers", String(min));
+    if (max !== undefined) nextSearchParams.set("maxFollowers", String(max));
+    if (locationFilter) nextSearchParams.set("location", locationFilter);
+    setLeadFilters(nextFilters);
+    setSearchParams(nextSearchParams, { replace: true });
     setLeadsPage(1);
   }
 
@@ -100,6 +120,7 @@ export function ScrapeJobDetail() {
     setMaxFollowers("");
     setLocation("");
     setLeadFilters({});
+    setSearchParams(new URLSearchParams(), { replace: true });
     setFilterError(null);
     setLeadsPage(1);
   }

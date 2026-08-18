@@ -3,7 +3,8 @@ import { useId, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 import { listAccounts } from "../api/accounts";
 import { ApiError } from "../api/client";
-import { createScrape } from "../api/scrapes";
+import type { ListLeadsFilters } from "../api/leads";
+import { createScrape, type CreateScrapeInput } from "../api/scrapes";
 import type { EngagementType, SourceType } from "../api/types";
 import { SkeletonRows } from "../components/Skeleton";
 
@@ -38,6 +39,12 @@ const ENGAGEMENT_TYPES: { value: EngagementType; label: string }[] = [
   { value: "retweeters", label: "Retweeters (reposts)" },
 ];
 
+type ResultFilters = Pick<ListLeadsFilters, "minFollowers" | "maxFollowers" | "location">;
+interface TriggerScrapeSubmission {
+  scrape: CreateScrapeInput;
+  resultFilters: ResultFilters;
+}
+
 export function TriggerScrape() {
   const navigate = useNavigate();
   const accountsQuery = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
@@ -47,12 +54,25 @@ export function TriggerScrape() {
   const [sourceRef, setSourceRef] = useState("");
   const [engagementTypes, setEngagementTypes] = useState<EngagementType[]>(["repliers", "retweeters"]);
   const [capLeads, setCapLeads] = useState("");
+  const [minFollowers, setMinFollowers] = useState("");
+  const [maxFollowers, setMaxFollowers] = useState("");
+  const [location, setLocation] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const idPrefix = useId();
 
   const mutation = useMutation({
-    mutationFn: createScrape,
-    onSuccess: ({ scrapeJob }) => navigate(`/scrapes/${scrapeJob.id}`),
+    mutationFn: ({ scrape }: TriggerScrapeSubmission) => createScrape(scrape),
+    onSuccess: ({ scrapeJob }, { resultFilters }) => {
+      const searchParams = new URLSearchParams();
+      if (resultFilters.minFollowers !== undefined) {
+        searchParams.set("minFollowers", String(resultFilters.minFollowers));
+      }
+      if (resultFilters.maxFollowers !== undefined) {
+        searchParams.set("maxFollowers", String(resultFilters.maxFollowers));
+      }
+      if (resultFilters.location) searchParams.set("location", resultFilters.location);
+      navigate({ pathname: `/scrapes/${scrapeJob.id}`, search: searchParams.toString() });
+    },
   });
 
   const accounts = accountsQuery.data?.accounts ?? [];
@@ -85,12 +105,36 @@ export function TriggerScrape() {
       return;
     }
 
+    const min = minFollowers === "" ? undefined : Number(minFollowers);
+    const max = maxFollowers === "" ? undefined : Number(maxFollowers);
+    if (min !== undefined && (!Number.isSafeInteger(min) || min < 0)) {
+      setFormError("Minimum followers must be a non-negative whole number.");
+      return;
+    }
+    if (max !== undefined && (!Number.isSafeInteger(max) || max < 0)) {
+      setFormError("Maximum followers must be a non-negative whole number.");
+      return;
+    }
+    if (min !== undefined && max !== undefined && min > max) {
+      setFormError("Maximum followers must be greater than or equal to minimum followers.");
+      return;
+    }
+
+    const locationFilter = location.trim();
+
     mutation.mutate({
-      xAccountId,
-      sourceType,
-      sourceRef: sourceRef.trim(),
-      engagementTypes: sourceType === "engagers" ? engagementTypes : undefined,
-      capLeads: cap,
+      scrape: {
+        xAccountId,
+        sourceType,
+        sourceRef: sourceRef.trim(),
+        engagementTypes: sourceType === "engagers" ? engagementTypes : undefined,
+        capLeads: cap,
+      },
+      resultFilters: {
+        ...(min !== undefined ? { minFollowers: min } : {}),
+        ...(max !== undefined ? { maxFollowers: max } : {}),
+        ...(locationFilter ? { location: locationFilter } : {}),
+      },
     });
   }
 
@@ -220,6 +264,75 @@ export function TriggerScrape() {
             className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
           />
         </div>
+
+        <fieldset className="space-y-3 rounded-lg border p-4">
+          <legend className="px-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            Result filters <span className="font-normal text-zinc-400">(optional)</span>
+          </legend>
+          <p className="text-xs text-zinc-500">
+            Talonr still saves every collected lead. These filters control which leads are shown when the scrape opens.
+          </p>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label
+                htmlFor={`${idPrefix}-min-followers`}
+                className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400"
+              >
+                Min followers
+              </label>
+              <input
+                id={`${idPrefix}-min-followers`}
+                type="number"
+                min={0}
+                step={1}
+                value={minFollowers}
+                onChange={(event) => setMinFollowers(event.target.value)}
+                placeholder="No minimum"
+                className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor={`${idPrefix}-max-followers`}
+                className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400"
+              >
+                Max followers
+              </label>
+              <input
+                id={`${idPrefix}-max-followers`}
+                type="number"
+                min={0}
+                step={1}
+                value={maxFollowers}
+                onChange={(event) => setMaxFollowers(event.target.value)}
+                placeholder="No maximum"
+                className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label
+              htmlFor={`${idPrefix}-location`}
+              className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400"
+            >
+              Country or location
+            </label>
+            <input
+              id={`${idPrefix}-location`}
+              value={location}
+              onChange={(event) => setLocation(event.target.value)}
+              maxLength={200}
+              placeholder="e.g. Ghana or Accra"
+              className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+          </div>
+
+          <p className="text-xs text-zinc-500">
+            Accounts with unknown follower counts are excluded when a follower bound is set.
+          </p>
+        </fieldset>
 
         {(formError || apiError) && <p className="text-sm text-status-danger">{formError ?? apiError}</p>}
 
