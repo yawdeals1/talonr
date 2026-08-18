@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Lead } from "../../db/schema.js";
 import { NotFoundError } from "../../lib/errors.js";
-import { deleteLead, getLead } from "./leads.service.js";
+import { deleteLead, getLead, listLeads } from "./leads.service.js";
 
 // Compensating control for the lack of database-level tenant isolation (see
 // accounts.service.test.ts for the full rationale) — this file covers leads.service.ts's own
@@ -73,5 +73,58 @@ describe("leads.service ownership isolation", () => {
     studioGet.mockResolvedValue(ownedLead);
     await expect(deleteLead(ATTACKER, LEAD_ID)).rejects.toBeInstanceOf(NotFoundError);
     expect(studioDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe("listLeads optional profile filters", () => {
+  const matchingLead: Lead = {
+    ...ownedLead,
+    id: "lead-matching",
+    handle: "accrafounder",
+    followers: 2_500,
+    location: "Accra, Ghana",
+  };
+  const tooSmall: Lead = {
+    ...ownedLead,
+    id: "lead-too-small",
+    handle: "smallaccount",
+    followers: 50,
+    location: "Accra, Ghana",
+  };
+  const wrongLocation: Lead = {
+    ...ownedLead,
+    id: "lead-wrong-location",
+    handle: "londonfounder",
+    followers: 3_000,
+    location: "London, UK",
+  };
+  const unknownFollowers: Lead = {
+    ...ownedLead,
+    id: "lead-unknown-followers",
+    handle: "unknownaccount",
+    followers: null,
+    location: "Accra, Ghana",
+  };
+
+  it("filters by follower range and case-insensitive location before pagination", async () => {
+    studioList.mockResolvedValue([matchingLead, tooSmall, wrongLocation, unknownFollowers]);
+
+    const result = await listLeads(OWNER, {
+      minFollowers: 1_000,
+      maxFollowers: 5_000,
+      location: "ghana",
+      page: 1,
+      pageSize: 50,
+    });
+
+    expect(result.leads).toEqual([matchingLead]);
+  });
+
+  it("keeps every lead when the optional filters are omitted", async () => {
+    studioList.mockResolvedValue([matchingLead, tooSmall, wrongLocation, unknownFollowers]);
+
+    const result = await listLeads(OWNER, { page: 1, pageSize: 50 });
+
+    expect(result.leads).toHaveLength(4);
   });
 });

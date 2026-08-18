@@ -12,8 +12,23 @@ const listQuerySchema = z.object({
   // Lets a scrape job's detail page show the leads currently on file for that job's target
   // (sourceType + sourceRef) — see scrapes.controller.ts's job detail route.
   sourceRef: z.string().optional(),
+  minFollowers: z.coerce.number().int().nonnegative().optional(),
+  maxFollowers: z.coerce.number().int().nonnegative().optional(),
+  location: z.string().trim().min(1).max(200).optional(),
   page: z.coerce.number().int().positive().optional(),
   pageSize: z.coerce.number().int().positive().optional(),
+}).superRefine((data, ctx) => {
+  if (
+    data.minFollowers !== undefined &&
+    data.maxFollowers !== undefined &&
+    data.minFollowers > data.maxFollowers
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["maxFollowers"],
+      message: "Maximum followers must be greater than or equal to minimum followers",
+    });
+  }
 });
 
 export async function list(req: AuthedRequest, res: Response) {

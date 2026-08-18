@@ -4,11 +4,15 @@ import type { Lead, SourceType } from "../../db/schema.js";
 import { mapWithConcurrency } from "../../lib/concurrency.js";
 import { NotFoundError } from "../../lib/errors.js";
 import type { RawLead } from "../../scraper/types.js";
+import { buildFilterPredicate } from "../lead-lists/filter-query-builder.js";
 
 export interface ListLeadsOptions {
   handle?: string;
   sourceType?: SourceType;
   sourceRef?: string;
+  minFollowers?: number;
+  maxFollowers?: number;
+  location?: string;
   page?: number;
   pageSize?: number;
 }
@@ -73,10 +77,15 @@ export async function listLeads(userId: string, options: ListLeadsOptions) {
     (a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt)
   );
 
-  const normalized = all.map(normalizeStudioSourceType);
-  const filtered = options.handle
-    ? normalized.filter((l) => l.handle.toLowerCase().includes(options.handle!.toLowerCase()))
-    : normalized;
+  const predicate = buildFilterPredicate({
+    minFollowers: options.minFollowers,
+    maxFollowers: options.maxFollowers,
+    location: options.location,
+  });
+  const handleNeedle = options.handle?.toLowerCase();
+  const filtered = all
+    .map(normalizeStudioSourceType)
+    .filter((lead) => (!handleNeedle || lead.handle.toLowerCase().includes(handleNeedle)) && predicate(lead));
 
   const start = (page - 1) * pageSize;
   const rows = filtered.slice(start, start + pageSize);

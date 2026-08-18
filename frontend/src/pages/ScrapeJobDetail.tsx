@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useId, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { getAccount } from "../api/accounts";
 import { ApiError } from "../api/client";
-import { listLeads } from "../api/leads";
+import { listLeads, type ListLeadsFilters } from "../api/leads";
 import { cancelScrape, deleteScrape, getScrape } from "../api/scrapes";
 import type { Lead } from "../api/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -15,6 +15,7 @@ import { StatusPill } from "../components/StatusPill";
 import { formatDateTime, formatNumber } from "../lib/format";
 
 const LEADS_PAGE_SIZE = 50;
+type ScrapeLeadFilters = Pick<ListLeadsFilters, "minFollowers" | "maxFollowers" | "location">;
 
 export function ScrapeJobDetail() {
   const { id } = useParams<{ id: string }>();
@@ -23,6 +24,12 @@ export function ScrapeJobDetail() {
   const [leadsPage, setLeadsPage] = useState(1);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [minFollowers, setMinFollowers] = useState("");
+  const [maxFollowers, setMaxFollowers] = useState("");
+  const [location, setLocation] = useState("");
+  const [leadFilters, setLeadFilters] = useState<ScrapeLeadFilters>({});
+  const [filterError, setFilterError] = useState<string | null>(null);
+  const idPrefix = useId();
 
   const jobQuery = useQuery({
     queryKey: ["scrapes", id],
@@ -46,12 +53,56 @@ export function ScrapeJobDetail() {
   // target rather than only the ones this exact run produced — the closest available
   // approximation without a scrape_job_id column on `leads`.
   const leadsQuery = useQuery({
-    queryKey: ["leads", "byJob", job?.sourceType, job?.sourceRef, leadsPage],
+    queryKey: ["leads", "byJob", job?.sourceType, job?.sourceRef, leadFilters, leadsPage],
     queryFn: () =>
-      listLeads({ sourceType: job!.sourceType, sourceRef: job!.sourceRef, page: leadsPage, pageSize: LEADS_PAGE_SIZE }),
+      listLeads({
+        sourceType: job!.sourceType,
+        sourceRef: job!.sourceRef,
+        ...leadFilters,
+        page: leadsPage,
+        pageSize: LEADS_PAGE_SIZE,
+      }),
     enabled: !!job,
   });
   const leads = leadsQuery.data?.leads ?? [];
+  const hasLeadFilters = Object.keys(leadFilters).length > 0;
+
+  function applyLeadFilters(event: FormEvent) {
+    event.preventDefault();
+    setFilterError(null);
+
+    const min = minFollowers === "" ? undefined : Number(minFollowers);
+    const max = maxFollowers === "" ? undefined : Number(maxFollowers);
+    if (min !== undefined && (!Number.isSafeInteger(min) || min < 0)) {
+      setFilterError("Minimum followers must be a non-negative whole number.");
+      return;
+    }
+    if (max !== undefined && (!Number.isSafeInteger(max) || max < 0)) {
+      setFilterError("Maximum followers must be a non-negative whole number.");
+      return;
+    }
+    if (min !== undefined && max !== undefined && min > max) {
+      setFilterError("Maximum followers must be greater than or equal to minimum followers.");
+      return;
+    }
+
+    const locationFilter = location.trim();
+    setLeadFilters({
+      ...(min !== undefined ? { minFollowers: min } : {}),
+      ...(max !== undefined ? { maxFollowers: max } : {}),
+      ...(locationFilter ? { location: locationFilter } : {}),
+    });
+    setLeadsPage(1);
+  }
+
+  function clearLeadFilters() {
+    setMinFollowers("");
+    setMaxFollowers("");
+    setLocation("");
+    setLeadFilters({});
+    setFilterError(null);
+    setLeadsPage(1);
+  }
 
   const cancelMutation = useMutation({
     mutationFn: () => cancelScrape(id!),
@@ -170,10 +221,87 @@ export function ScrapeJobDetail() {
           </p>
         </div>
 
+        <form onSubmit={applyLeadFilters} className="rounded-lg border p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Filter collected leads</h3>
+              <p className="text-xs text-zinc-500">All fields are optional. Filters do not remove saved leads.</p>
+            </div>
+            {hasLeadFilters && (
+              <button
+                type="button"
+                onClick={clearLeadFilters}
+                className="text-xs font-medium text-accent-text hover:underline"
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div>
+              <label htmlFor={`${idPrefix}-min-followers`} className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                Min followers
+              </label>
+              <input
+                id={`${idPrefix}-min-followers`}
+                type="number"
+                min={0}
+                step={1}
+                value={minFollowers}
+                onChange={(event) => setMinFollowers(event.target.value)}
+                placeholder="No minimum"
+                className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+              />
+            </div>
+            <div>
+              <label htmlFor={`${idPrefix}-max-followers`} className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                Max followers
+              </label>
+              <input
+                id={`${idPrefix}-max-followers`}
+                type="number"
+                min={0}
+                step={1}
+                value={maxFollowers}
+                onChange={(event) => setMaxFollowers(event.target.value)}
+                placeholder="No maximum"
+                className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+              />
+            </div>
+            <div>
+              <label htmlFor={`${idPrefix}-location`} className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                Country or location
+              </label>
+              <input
+                id={`${idPrefix}-location`}
+                value={location}
+                onChange={(event) => setLocation(event.target.value)}
+                maxLength={200}
+                placeholder="e.g. Ghana or Accra"
+                className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+              />
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <p className="text-xs text-zinc-500">
+              Leads with unknown follower counts are excluded when a follower bound is set.
+            </p>
+            <button
+              type="submit"
+              className="shrink-0 rounded-md bg-accent px-4 py-2 text-xs font-medium text-white hover:opacity-90"
+            >
+              Apply filters
+            </button>
+          </div>
+          {filterError && <p className="mt-2 text-xs text-status-danger">{filterError}</p>}
+        </form>
+
         {leadsQuery.isLoading ? (
           <SkeletonRows rows={5} cols={7} />
         ) : leads.length === 0 ? (
-          <EmptyState title="No leads on file for this target yet" />
+          <EmptyState title={hasLeadFilters ? "No leads match these filters" : "No leads on file for this target yet"} />
         ) : (
           <>
             <LeadsTable leads={leads} onRowClick={setSelectedLead} />

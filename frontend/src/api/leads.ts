@@ -5,6 +5,9 @@ export interface ListLeadsFilters {
   handle?: string;
   sourceType?: SourceType;
   sourceRef?: string;
+  minFollowers?: number;
+  maxFollowers?: number;
+  location?: string;
   page?: number;
   pageSize?: number;
 }
