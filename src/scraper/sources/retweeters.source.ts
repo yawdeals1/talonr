@@ -1,6 +1,6 @@
 import type { Page } from "playwright";
 import { extractUserCells } from "../parsers/user-cell.parser.js";
-import { X_TWEET_URL_PATTERN, type ScrapeSource } from "../types.js";
+import { X_TWEET_URL_PATTERN, type RawLead, type ScrapeSource } from "../types.js";
 
 /**
  * sourceRef is the full tweet URL, e.g. https://x.com/handle/status/1234567890. Unlike likers
@@ -24,5 +24,10 @@ export const retweetersSource: ScrapeSource = {
   async waitForReady(page: Page) {
     await page.waitForSelector('[data-testid="UserCell"]', { timeout: 15000 });
   },
-  extractVisibleItems: extractUserCells,
+  async extractVisibleItems(page: Page): Promise<RawLead[]> {
+    // Same exclusion the repliers source applies: the tweet's own author isn't an engager to
+    // collect, and X surfaces them around this list.
+    const authorHandle = new URL(page.url()).pathname.split("/")[1];
+    return extractUserCells(page, { excludeHandles: authorHandle ? [authorHandle] : [] });
+  },
 };

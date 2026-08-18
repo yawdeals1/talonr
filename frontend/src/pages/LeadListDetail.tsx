@@ -29,7 +29,8 @@ export function LeadListDetail() {
     return <div className="text-sm text-zinc-500">Lead list not found.</div>;
   }
 
-  const { list, leads } = query.data;
+  const { list, leads, total } = query.data;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="space-y-4">
@@ -58,7 +59,9 @@ export function LeadListDetail() {
         <>
           <LeadsTable leads={leads} onRowClick={setSelected} />
           <div className="flex items-center justify-between text-sm text-zinc-500">
-            <span>Page {page}</span>
+            <span>
+              Page {page} of {totalPages} · {total} matching lead{total === 1 ? "" : "s"}
+            </span>
             <div className="flex gap-2">
               <button
                 type="button"
@@ -70,7 +73,7 @@ export function LeadListDetail() {
               </button>
               <button
                 type="button"
-                disabled={leads.length < PAGE_SIZE}
+                disabled={page >= totalPages}
                 onClick={() => setPage((p) => p + 1)}
                 className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-zinc-50 disabled:opacity-40 dark:hover:bg-zinc-800"
               >

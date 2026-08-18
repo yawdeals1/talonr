@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Lead } from "../../db/schema.js";
 import { NotFoundError } from "../../lib/errors.js";
-import { deleteLead, deleteLeads, getLead, listLeads } from "./leads.service.js";
+import { compareLeadsForDisplay, deleteLead, deleteLeads, getLead, listLeads, upsertLeads } from "./leads.service.js";
 
 // Compensating control for the lack of database-level tenant isolation (see
 // accounts.service.test.ts for the full rationale) — this file covers leads.service.ts's own
@@ -138,5 +138,87 @@ describe("listLeads optional profile filters", () => {
     const result = await listLeads(OWNER, { page: 1, pageSize: 50 });
 
     expect(result.leads).toHaveLength(4);
+  });
+
+  it("reports the full matched total, not the page length", async () => {
+    studioList.mockResolvedValue([matchingLead, tooSmall, wrongLocation, unknownFollowers]);
+
+    const result = await listLeads(OWNER, { page: 1, pageSize: 2 });
+
+    expect(result.leads).toHaveLength(2);
+    expect(result.total).toBe(4);
+  });
+});
+
+describe("compareLeadsForDisplay", () => {
+  // The Studio API has no ORDER BY, so studioListSorted pages an unordered relation and sorts in
+  // Node. Leads written by one scrape share a lastSeenAt, so without a total order those ties
+  // resolved differently per request and paging skipped/repeated leads.
+  const sameSecond = (id: string): Lead => ({ ...ownedLead, id, lastSeenAt: "2026-01-01T00:00:00.000Z" });
+
+  it("orders newest-seen first", () => {
+    const older: Lead = { ...ownedLead, id: "a", lastSeenAt: "2026-01-01T00:00:00.000Z" };
+    const newer: Lead = { ...ownedLead, id: "b", lastSeenAt: "2026-02-01T00:00:00.000Z" };
+    expect([older, newer].sort(compareLeadsForDisplay).map((l) => l.id)).toEqual(["b", "a"]);
+  });
+
+  it("breaks lastSeenAt ties deterministically regardless of arrival order", () => {
+    const arrivalA = [sameSecond("c"), sameSecond("a"), sameSecond("b")];
+    const arrivalB = [sameSecond("b"), sameSecond("c"), sameSecond("a")];
+
+    expect(arrivalA.sort(compareLeadsForDisplay).map((l) => l.id)).toEqual(["a", "b", "c"]);
+    expect(arrivalB.sort(compareLeadsForDisplay).map((l) => l.id)).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("upsertLeads profile-data preservation", () => {
+  it("does not overwrite a known follower count when enrichment came back empty", async () => {
+    // Profile enrichment is best-effort. Writing its nulls over an already-enriched row erased
+    // follower counts and locations, dropping the lead out of every follower-range filter.
+    const existing: Lead = { ...ownedLead, followers: 5_000, location: "Accra, Ghana", bio: "founder" };
+    studioList.mockResolvedValue({ rows: [existing] });
+    studioUpdate.mockResolvedValue(existing);
+
+    await upsertLeads(OWNER, "search", "keyword", [
+      {
+        handle: existing.handle,
+        displayName: null,
+        bio: null,
+        followers: null,
+        location: null,
+        verified: false,
+        profileImage: null,
+      },
+    ]);
+
+    expect(studioUpdate).toHaveBeenCalledWith(
+      "leads",
+      existing.id,
+      expect.objectContaining({ followers: 5_000, location: "Accra, Ghana", bio: "founder" })
+    );
+  });
+
+  it("still applies freshly scraped profile data over the stored values", async () => {
+    const existing: Lead = { ...ownedLead, followers: 5_000, location: "Accra, Ghana" };
+    studioList.mockResolvedValue({ rows: [existing] });
+    studioUpdate.mockResolvedValue(existing);
+
+    await upsertLeads(OWNER, "search", "keyword", [
+      {
+        handle: existing.handle,
+        displayName: "Someone Else",
+        bio: "new bio",
+        followers: 6_100,
+        location: "London, UK",
+        verified: true,
+        profileImage: null,
+      },
+    ]);
+
+    expect(studioUpdate).toHaveBeenCalledWith(
+      "leads",
+      existing.id,
+      expect.objectContaining({ followers: 6_100, location: "London, UK", bio: "new bio", verified: true })
+    );
   });
 });

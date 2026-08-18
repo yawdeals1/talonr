@@ -2,11 +2,15 @@ import { studioDelete, studioGet, studioInsert, studioListSorted, studioUpdate }
 import { normalizeStudioSourceType } from "../../db/source-type-compat.js";
 import type { FilterDefinition, Lead, LeadList } from "../../db/schema.js";
 import { NotFoundError } from "../../lib/errors.js";
+import { compareLeadsForDisplay } from "../leads/leads.service.js";
 import { isInternalScrapeResultList } from "../scrapes/scrape-results.service.js";
 import { buildFilterPredicate } from "./filter-query-builder.js";
 
-const byCreatedAtDesc = (a: { createdAt: string }, b: { createdAt: string }) =>
-  b.createdAt.localeCompare(a.createdAt);
+// The id tiebreaker gives these a total order — the Studio API has no ORDER BY, so paged fetches
+// arrive in an arbitrary order and ties would otherwise resolve differently per request. See
+// leads.service.ts#compareLeadsForDisplay.
+const byCreatedAtDesc = (a: { createdAt: string; id: string }, b: { createdAt: string; id: string }) =>
+  b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id);
 
 export async function listLeadLists(userId: string) {
   const lists = await studioListSorted<LeadList>("lead_lists", { filter: { userId } }, byCreatedAtDesc);
@@ -57,7 +61,7 @@ export async function evaluateLeadList(userId: string, id: string, page = 1, pag
   const candidates = await studioListSorted<Lead>(
     "leads",
     { filter: { userId }, cap: 5000 },
-    (a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt)
+    compareLeadsForDisplay
   );
 
   const matched = candidates.map(normalizeStudioSourceType).filter(predicate);
@@ -65,5 +69,5 @@ export async function evaluateLeadList(userId: string, id: string, page = 1, pag
   const start = (page - 1) * size;
   const rows = capped.slice(start, start + size);
 
-  return { list, leads: rows, page, pageSize: size };
+  return { list, leads: rows, page, pageSize: size, total: capped.length };
 }

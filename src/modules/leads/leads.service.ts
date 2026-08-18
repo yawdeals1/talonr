@@ -20,6 +20,19 @@ export interface ListLeadsOptions {
 const UPSERT_CONCURRENCY = 8;
 
 /**
+ * Newest-seen first, tie-broken by id.
+ *
+ * The id tiebreaker is load-bearing, not cosmetic: the Studio API has no ORDER BY, so
+ * studioListSorted pages with LIMIT/OFFSET over an unordered relation and sorts in Node. Every
+ * lead written by a single scrape shares essentially the same lastSeenAt, so without a total
+ * order those ties resolved differently on each request — paging through /leads silently skipped
+ * some leads and showed others twice.
+ */
+export function compareLeadsForDisplay(a: Lead, b: Lead): number {
+  return b.lastSeenAt.localeCompare(a.lastSeenAt) || a.id.localeCompare(b.id);
+}
+
+/**
  * No bulk upsert endpoint on the Studio API — each lead is a GET (existence check by the
  * user_id+handle unique key) followed by a POST or PATCH, run with bounded concurrency. This is
  * meaningfully slower than the single `INSERT ... ON CONFLICT` this replaced, but scrape volume is
@@ -47,7 +60,20 @@ export async function upsertLeads(
     };
 
     if (rows[0]) {
-      return studioUpdate<Lead>("leads", rows[0].id, { ...fields, lastSeenAt: new Date() });
+      const existing = rows[0];
+      // Profile enrichment is best-effort (a suspended/slow profile leaves these null). Writing
+      // those nulls straight over a previously-enriched row erased follower counts and locations
+      // that were already on file, which then dropped the lead out of every follower-range or
+      // location filter. Only overwrite when the new scrape actually learned something.
+      return studioUpdate<Lead>("leads", existing.id, {
+        ...fields,
+        displayName: lead.displayName ?? existing.displayName,
+        bio: lead.bio ?? existing.bio,
+        followers: lead.followers ?? existing.followers,
+        location: lead.location ?? existing.location,
+        profileImage: lead.profileImage ?? existing.profileImage,
+        lastSeenAt: new Date(),
+      });
     } else {
       // firstSeenAt/lastSeenAt omitted — the column defaults (NOW()) apply on insert.
       return studioInsert<Lead>("leads", { userId, handle: lead.handle, ...fields });
@@ -73,7 +99,7 @@ export async function listLeads(userId: string, options: ListLeadsOptions) {
       },
       cap: 5000,
     },
-    (a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt)
+    compareLeadsForDisplay
   );
 
   const predicate = buildFilterPredicate({
@@ -89,7 +115,10 @@ export async function listLeads(userId: string, options: ListLeadsOptions) {
   const start = (page - 1) * pageSize;
   const rows = filtered.slice(start, start + pageSize);
 
-  return { leads: rows, page, pageSize };
+  // `total` is the full matched count, not the page length — the browser needs it to know whether
+  // a next page exists (inferring it from `rows.length < pageSize` misreports an exact multiple of
+  // pageSize as "there's more", landing the user on an empty page).
+  return { leads: rows, page, pageSize, total: filtered.length };
 }
 
 export async function getLead(userId: string, leadId: string) {

@@ -8,7 +8,10 @@ import { EmptyState } from "../components/EmptyState";
 import { SkeletonCards } from "../components/Skeleton";
 import { summarizeFilter } from "../lib/format";
 
-const COUNT_PAGE_SIZE = 200;
+// The evaluate endpoint returns the full matched `total` alongside the page, so the count badges
+// only need a single row back rather than the 200 they used to pull per card just to length-check
+// them (which also capped the badge at a misleading "200+").
+const COUNT_PAGE_SIZE = 1;
 
 export function LeadLists() {
   const navigate = useNavigate();
@@ -67,9 +70,8 @@ export function LeadLists() {
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {leadLists.map((list, i) => {
             const countResult = countQueries[i];
-            const count = countResult?.data?.leads.length;
-            const countLabel =
-              count === undefined ? "…" : count >= COUNT_PAGE_SIZE ? `${count}+` : String(count);
+            const count = countResult?.data?.total;
+            const countLabel = count === undefined ? "…" : String(count);
 
             return (
               <div

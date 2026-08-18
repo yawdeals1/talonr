@@ -108,7 +108,12 @@ upsert, no joins.** This shapes several service functions in ways worth knowing 
 them:
 
 - No `ORDER BY` support at all → every list function sorts client-side via
-  `studioListSorted()` (pages through results up to a cap, then sorts in Node).
+  `studioListSorted()` (pages through results up to a cap, then sorts in Node). **Every comparator
+  passed to it must define a _total_ order — tie-break on `id`** (see
+  `leads.service.ts#compareLeadsForDisplay`). Because the server has no ORDER BY, `studioListSorted`
+  pages LIMIT/OFFSET over an unordered relation, and every lead written by one scrape shares
+  essentially the same `lastSeenAt`; a comparator that leaves those ties unresolved returns a
+  different order per request, so paging silently skipped some rows and repeated others.
 - No bulk/upsert endpoint → `leads.service.ts#upsertLeads` does a bounded-concurrency (8) loop of
   one GET (existence check by the `user_id`+`handle` unique key) + one POST-or-PATCH per lead,
   instead of a single `INSERT ... ON CONFLICT`.
@@ -158,7 +163,13 @@ against a large multi-tenant dataset.
 visits each deduplicated lead's public profile sequentially before upsert and merges bio, follower
 count, location, verification, and avatar into the same job. The profile delay is conservative and
 configurable. `followers`/`location` remain nullable because profiles can omit them or be unavailable;
-`filter-query-builder.ts` excludes NULL-follower rows from min/max-follower filters.
+`filter-query-builder.ts` excludes NULL-follower rows from min/max-follower filters. Enrichment is
+best-effort, so `leads.service.ts#upsertLeads` merges rather than overwrites on re-scrape — a run
+whose enrichment failed must not null out a follower count/location already on file, or the lead
+silently drops out of every range filter. Follower counts come from `pickFollowerCount`, which
+prefers the stats link's exact `aria-label`/`title` ("6,412,338 Followers") over its rounded text
+("6.4M"): reading the rounded value made an account with 999 followers store as 1000 and pass a
+`minFollowers: 1000` filter it should have failed.
 
 ## Auth (`src/modules/auth/`)
 
@@ -275,8 +286,21 @@ let a user silently bypass the safety trip; resuming requires re-running the log
 Shared `ScrapeSource` interface (`buildUrl`, `waitForReady`, `extractVisibleItems`) implemented by
 `sources/{search,followers,repliers,retweeters}.source.ts`, all sharing
 `parsers/user-cell.parser.ts` since X reuses the same `[data-testid="UserCell"]` component across
-search results, followers lists, and a tweet's reply/retweet lists. `repliers`/`retweeters`
-together are the `engagers` sourceType (`scrape_jobs.engagement_types` picks which run) — they
+search results, followers lists, and a tweet's reply/retweet lists.
+
+**Extraction must stay scoped to `[data-testid="primaryColumn"]` and skip X's recommendation
+modules** (`user-cell.parser.ts`, `tweet-author.parser.ts`). X builds the right-rail "Who to
+follow" panel, in-timeline "You might like" carousels, and the "Discover more" block below a
+thread out of the *same* `UserCell`/`article[data-testid="tweet"]` markup as the real list, so a
+document-wide query mixed suggested accounts into every scrape — a followers scrape came back
+containing accounts that don't follow the target at all, re-collected on each scroll round because
+the sidebar never scrolls away. Suggestion blocks are detected conservatively (a `sidebarColumn`
+ancestor, a recommendation `aria-label`, or document order after a recommendation heading): a miss
+just keeps the cell, whereas an over-match would silently discard real leads. Sources also pass
+`excludeHandles` for the page's own subject — an account never follows itself, and a tweet's
+author isn't one of its engagers.
+
+`repliers`/`retweeters` together are the `engagers` sourceType (`scrape_jobs.engagement_types` picks which run) — they
 replaced `likers` after X made "who liked a post" private platform-wide in June 2024 with no
 workaround; `likers` stays a legal `SourceType`/enum value only so historical `scrape_jobs`/`leads`
 rows still typecheck, and is rejected at job-creation time for new jobs
@@ -327,7 +351,7 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 | POST | /scrapes/:id/cancel | auth | Removes from queue if still waiting/delayed; best-effort if already running |
 | DELETE | /scrapes/:id | auth | Deletes a non-running scrape record/queue entry; collected leads remain saved |
 | POST | /scrapes/bulk-delete | auth | Delete selected non-running scrape records after ownership/running preflight; collected leads remain saved |
-| GET | /leads | auth | Paginated own leads, filterable by `handle`/`sourceType` |
+| GET | /leads | auth | Paginated own leads, filterable by `handle`/`sourceType`/`sourceRef`/`minFollowers`/`maxFollowers`/`location`; returns the full matched `total` alongside the page |
 | GET | /leads/:id | auth | Lead detail |
 | DELETE | /leads/:id | auth | Permanently delete one owned lead; saved lead-list results update automatically |
 | POST | /leads/bulk-delete | auth | Permanently delete checkbox-selected owned leads after an all-or-nothing ownership preflight |
@@ -336,7 +360,7 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 | GET | /lead-lists/:id | auth | Get filter definition |
 | PATCH | /lead-lists/:id | auth | Update name/filterDefinition |
 | DELETE | /lead-lists/:id | auth | Delete |
-| GET | /lead-lists/:id/leads | auth | Evaluate the filter against `leads` at read time, paginated |
+| GET | /lead-lists/:id/leads | auth | Evaluate the filter against `leads` at read time, paginated; returns the full matched `total` alongside the page |
 | GET | /admin/users | admin | All users (id, email, role, createdAt — never deploro_account_id) |
 | GET | /admin/users/:id/accounts | admin | That user's x_accounts, status/limits only |
 | GET | /admin/scrape-jobs | admin | Cross-user scrape jobs, filterable by `userId`/`status` |

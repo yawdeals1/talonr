@@ -24,8 +24,10 @@ export interface CreateScrapeInput {
   resultFilterDefinition?: ScrapeResultFilter;
 }
 
-const byCreatedAtDesc = (a: { createdAt: string }, b: { createdAt: string }) =>
-  b.createdAt.localeCompare(a.createdAt);
+// Tie-broken by id so the ordering is total — the Studio API has no ORDER BY, so paged fetches
+// arrive arbitrarily ordered. See leads.service.ts#compareLeadsForDisplay.
+const byCreatedAtDesc = (a: { createdAt: string; id: string }, b: { createdAt: string; id: string }) =>
+  b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id);
 
 export async function createScrapeJob(userId: string, input: CreateScrapeInput) {
   const account = await studioGet<XAccount>("x_accounts", input.xAccountId);

@@ -14,7 +14,7 @@ export interface ListLeadsFilters {
 
 export function listLeads(
   filters: ListLeadsFilters = {}
-): Promise<{ leads: Lead[]; page: number; pageSize: number }> {
+): Promise<{ leads: Lead[]; page: number; pageSize: number; total: number }> {
   return apiFetch("/leads", { query: filters });
 }
 

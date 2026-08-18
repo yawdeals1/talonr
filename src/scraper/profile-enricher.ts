@@ -6,6 +6,10 @@ import { isAccountHealthError, RateLimitedError, type RawLead } from "./types.js
 interface ProfileDetails {
   displayName: string | null;
   bio: string | null;
+  // X renders the follower count twice on the stats link: rounded in the visible text ("6.4M")
+  // and exact in aria-label/title ("6,412,338 Followers"). Both are returned so the caller can
+  // prefer the exact one — see pickFollowerCount.
+  followersLabel: string | null;
   followersText: string | null;
   location: string | null;
   verified: boolean;
@@ -42,6 +46,32 @@ export function parseFollowerCount(value: string | null): number | null {
   return Math.round(number * multiplier);
 }
 
+/**
+ * Picks the most precise follower count among several renderings of the same number.
+ *
+ * X shows the count rounded in the link text ("6.4M", "1.2K") and exact in the link's
+ * aria-label/title ("6,412,338 Followers"). Reading the rounded one made follower-range filters
+ * compare against a bucket rather than the real number — an account with 999 followers renders as
+ * "1K", stores as 1000, and then passes a `minFollowers: 1000` filter it should have failed.
+ * More digits in the source string means less rounding, so that wins.
+ */
+export function pickFollowerCount(...candidates: (string | null)[]): number | null {
+  let best: number | null = null;
+  let bestDigits = -1;
+
+  for (const candidate of candidates) {
+    const parsed = parseFollowerCount(candidate);
+    if (parsed === null || candidate === null) continue;
+    const digits = (candidate.match(/\d/g) ?? []).length;
+    if (digits > bestDigits) {
+      best = parsed;
+      bestDigits = digits;
+    }
+  }
+
+  return best;
+}
+
 async function extractProfileDetails(page: Page, handle: string): Promise<ProfileDetails> {
   return page.evaluate((profileHandle) => {
     const primaryColumn = document.querySelector('[data-testid="primaryColumn"]') ?? document.querySelector("main");
@@ -49,6 +79,7 @@ async function extractProfileDetails(page: Page, handle: string): Promise<Profil
       return {
         displayName: null,
         bio: null,
+        followersLabel: null,
         followersText: null,
         location: null,
         verified: false,
@@ -57,9 +88,14 @@ async function extractProfileDetails(page: Page, handle: string): Promise<Profil
     }
 
     const userName = primaryColumn.querySelector('[data-testid="UserName"]');
-    const followerLink = Array.from(primaryColumn.querySelectorAll<HTMLAnchorElement>('a[href]')).find((anchor) => {
-      const path = new URL(anchor.href).pathname.replace(/\/+$/, "");
-      return path.endsWith("/followers") || path.endsWith("/verified_followers");
+    // Must be *this* profile's followers link. X also renders "Followers you know" and similar
+    // modules that link to other accounts' follower lists inside the same column.
+    const followerLink = Array.from(primaryColumn.querySelectorAll<HTMLAnchorElement>("a[href]")).find((anchor) => {
+      const segments = new URL(anchor.href).pathname.replace(/\/+$/, "").split("/");
+      if (segments.length !== 3) return false;
+      const [, owner, section] = segments;
+      if (owner?.toLowerCase() !== profileHandle.toLowerCase()) return false;
+      return section === "followers" || section === "verified_followers";
     });
     const displayName = userName?.querySelector("span")?.textContent?.trim() || null;
     const bio = primaryColumn.querySelector('[data-testid="UserDescription"]')?.textContent?.trim() || null;
@@ -73,7 +109,9 @@ async function extractProfileDetails(page: Page, handle: string): Promise<Profil
     return {
       displayName,
       bio,
-      followersText: followerLink?.textContent?.trim() ?? followerLink?.getAttribute("aria-label") ?? null,
+      followersLabel:
+        followerLink?.getAttribute("aria-label") ?? followerLink?.getAttribute("title") ?? null,
+      followersText: followerLink?.textContent?.trim() || null,
       location,
       verified: Boolean(userName?.querySelector('svg[data-testid="icon-verified"]')),
       profileImage,
@@ -114,7 +152,7 @@ export async function enrichLeadsFromProfiles(
           ...lead,
           displayName: details.displayName ?? lead.displayName,
           bio: details.bio ?? lead.bio,
-          followers: parseFollowerCount(details.followersText) ?? lead.followers,
+          followers: pickFollowerCount(details.followersLabel, details.followersText) ?? lead.followers,
           location: details.location ?? lead.location,
           verified: lead.verified || details.verified,
           profileImage: details.profileImage ?? lead.profileImage,

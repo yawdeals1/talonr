@@ -30,6 +30,6 @@ export function evaluateLeadList(
   id: string,
   page?: number,
   pageSize?: number
-): Promise<{ list: LeadList; leads: Lead[]; page: number; pageSize: number }> {
+): Promise<{ list: LeadList; leads: Lead[]; page: number; pageSize: number; total: number }> {
   return apiFetch(`/lead-lists/${id}/leads`, { query: { page, pageSize } });
 }

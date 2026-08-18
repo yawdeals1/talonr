@@ -95,7 +95,18 @@ async function runScrape(data: ScrapeJobData): Promise<{ leadsFound: number }> {
       maxDelayMs: env.PROFILE_DELAY_MAX_MS,
     });
     const savedLeads = await upsertLeads(data.userId, data.sourceType, data.sourceRef, enrichedLeads);
-    await saveScrapeJobLeadIds(data.userId, data.scrapeJobId, savedLeads.map((lead) => lead.id));
+    // The leads are already persisted at this point. Recording exact per-job membership is a
+    // nice-to-have on top of that, so a failure here must not throw: doing so marked a successful
+    // scrape "failed" and let BullMQ re-run the entire Playwright scrape up to `attempts` times,
+    // burning the account's daily quota and hitting X again for leads already collected.
+    try {
+      await saveScrapeJobLeadIds(data.userId, data.scrapeJobId, savedLeads.map((lead) => lead.id));
+    } catch (err) {
+      logger.warn(
+        { err, scrapeJobId: data.scrapeJobId },
+        "could not record exact lead membership; leads were saved and the job still counts as completed"
+      );
+    }
     return { leadsFound: savedLeads.length };
   } finally {
     await closeScrapeSession(session);
