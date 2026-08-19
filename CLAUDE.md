@@ -307,8 +307,36 @@ keyed by lowercased handle, `page.mouse.wheel` scroll, random delay from
 unique profile sequentially using `PROFILE_DELAY_MIN_MS`/`PROFILE_DELAY_MAX_MS`, merges bio,
 followers, location, verification, and avatar, then the worker upserts the complete leads.
 `detectors.ts#checkHealth` checks URL patterns
-(login/challenge/lockdown redirects), a captcha iframe selector, and rate-limit text on the page;
-`watchForRateLimitResponses` also listens for HTTP 429s. Source `sourceRef` semantics: `search` =
+(login/challenge/lockdown redirects), a captcha iframe selector, and X's own status text;
+`watchForRateLimitResponses` listens for HTTP 429s and is wired into **both** the collection phase
+(`scroll-collector.ts`) and profile enrichment — it's the authoritative throttling signal, since it
+can't be faked by page content.
+
+**Page-text detection must stay scoped and narrowly classified**, because a rate-limit match
+checkpoints the X account and `accounts.service.ts#updateAccount` refuses to flip a checkpointed
+account back to `active` — recovering from a false positive costs a full interactive re-login.
+`collectSignalSnippets` (runs in-page; self-contained, no imports/closures, passed to
+`page.evaluate`) walks individual text nodes, skipping user-generated content
+(`UserCell`/`UserDescription`/`tweetText`/`User-Name`/`sidebarColumn`/`article`) and anything not
+actually rendered; `classifyPageSignals` then splits the result two ways. Both halves replaced a
+single document-wide `page.getByText(/rate limit|something went wrong.*reload|try again later/i)`
+that matched hidden nodes and lead bios alike: it checkpointed a healthy account on a followers
+scrape that had collected nothing yet.
+- **`RateLimitedError`** (terminal, checkpoints the account) — only X's actual throttling wording.
+- **`TransientPageError`** (retryable, *not* an `isAccountHealthError`) — X's generic "Something
+  went wrong. Try reloading." boundary, which fires for any one-off failed request and is routinely
+  on screen while the SPA hydrates, exactly when the first `checkHealth` runs. `openListPage`
+  reloads up to 3 times on it; mid-scroll it just skips the round (reloading would reset to the top
+  of the list) and counts a stagnant round. Exhausting the retries throws a plain `Error` so
+  BullMQ's normal attempts/backoff apply instead of a checkpoint.
+
+A run cut short still keeps its work: `scrollAndCollect` attaches whatever it collected to the
+thrown error (`attachPartialLeads`/`getPartialLeads` in `scraper/types.ts`; `engagers` passes one
+shared `into` map across both strategies so the first one's leads survive a failure in the second),
+and the worker upserts those partials — skipping enrichment, which is the last thing to do while X
+is pushing back — before checkpointing, so a throttled run reports the leads it got instead of `0`.
+
+Source `sourceRef` semantics: `search` =
 raw keyword/query string, `followers` = target handle (without `@`), `engagers` = full tweet URL.
 `sourceRef` is validated against an X handle/tweet-URL shape (`scraper/types.ts`'s
 `X_HANDLE_PATTERN`/`X_TWEET_URL_PATTERN`) both at job-creation time and again inside

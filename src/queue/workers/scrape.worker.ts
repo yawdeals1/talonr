@@ -14,7 +14,15 @@ import { followersSource } from "../../scraper/sources/followers.source.js";
 import { repliersSource } from "../../scraper/sources/repliers.source.js";
 import { retweetersSource } from "../../scraper/sources/retweeters.source.js";
 import { searchSource } from "../../scraper/sources/search.source.js";
-import { isAccountHealthError, type RawLead, type ScrapeSource } from "../../scraper/types.js";
+import {
+  attachPartialLeads,
+  getPartialLeads,
+  getPartialLeadsSaved,
+  isAccountHealthError,
+  setPartialLeadsSaved,
+  type RawLead,
+  type ScrapeSource,
+} from "../../scraper/types.js";
 import { redisConnection } from "../connection.js";
 import { SCRAPE_QUEUE_NAME, type ScrapeJobData } from "../queues.js";
 import { acquireAccountSlot, releaseAccountSlot } from "../rate-limit/account-semaphore.js";
@@ -49,6 +57,46 @@ async function touchAccountLastUsed(xAccountId: string) {
   await studioUpdate<XAccount>("x_accounts", xAccountId, { lastUsedAt: new Date() });
 }
 
+async function persistLeads(data: ScrapeJobData, leads: RawLead[]): Promise<number> {
+  const savedLeads = await upsertLeads(data.userId, data.sourceType, data.sourceRef, leads);
+  // The leads are already persisted at this point. Recording exact per-job membership is a
+  // nice-to-have on top of that, so a failure here must not throw: doing so marked a successful
+  // scrape "failed" and let BullMQ re-run the entire Playwright scrape up to `attempts` times,
+  // burning the account's daily quota and hitting X again for leads already collected.
+  try {
+    await saveScrapeJobLeadIds(data.userId, data.scrapeJobId, savedLeads.map((lead) => lead.id));
+  } catch (err) {
+    logger.warn(
+      { err, scrapeJobId: data.scrapeJobId },
+      "could not record exact lead membership; leads were saved and the job still counts as completed"
+    );
+  }
+  return savedLeads.length;
+}
+
+/**
+ * Saves whatever a cut-short run managed to collect, recording the count on the error so the
+ * caller can report it on the paused job.
+ *
+ * Enrichment is deliberately skipped: the run was stopped because X pushed back, and visiting one
+ * profile per lead is the last thing to do in that state. `upsertLeads` merges rather than
+ * overwrites, so the missing profile fields stay whatever a previous scrape put on file and get
+ * filled in on the next successful run.
+ */
+async function savePartialLeads(data: ScrapeJobData, err: unknown): Promise<void> {
+  const partial = getPartialLeads(err);
+  if (partial.length === 0) return;
+
+  try {
+    setPartialLeadsSaved(err, await persistLeads(data, partial));
+  } catch (saveErr) {
+    logger.warn(
+      { err: saveErr, scrapeJobId: data.scrapeJobId },
+      "could not save partial leads from a cut-short scrape"
+    );
+  }
+}
+
 async function runScrape(data: ScrapeJobData): Promise<{ leadsFound: number }> {
   const account = await studioGet<XAccount>("x_accounts", data.xAccountId);
   if (!account) throw new Error(`X account ${data.xAccountId} not found`);
@@ -73,41 +121,40 @@ async function runScrape(data: ScrapeJobData): Promise<{ leadsFound: number }> {
     };
 
     let rawLeads: RawLead[];
-    if (data.sourceType === "engagers") {
-      // Each engagement type is its own page/strategy (reply thread vs. the retweets list) —
-      // run them one after another on the same page and merge, deduping by handle so someone
-      // who both replied and retweeted only counts once.
-      const merged = new Map<string, RawLead>();
-      for (const type of data.engagementTypes ?? []) {
-        const items = await scrollAndCollect(ENGAGEMENT_SOURCES[type], collectOpts);
-        for (const item of items) {
-          const key = item.handle.toLowerCase();
-          if (!merged.has(key)) merged.set(key, item);
+    try {
+      if (data.sourceType === "engagers") {
+        // Each engagement type is its own page/strategy (reply thread vs. the retweets list) —
+        // run them one after another on the same page and merge, deduping by handle so someone
+        // who both replied and retweeted only counts once. The shared map also means a failure
+        // during the second strategy still carries the first one's leads out as partials.
+        const merged = new Map<string, RawLead>();
+        for (const type of data.engagementTypes ?? []) {
+          await scrollAndCollect(ENGAGEMENT_SOURCES[type], { ...collectOpts, into: merged });
         }
+        rawLeads = Array.from(merged.values()).slice(0, data.capLeads);
+      } else {
+        rawLeads = await scrollAndCollect(SOURCES[data.sourceType], collectOpts);
       }
-      rawLeads = Array.from(merged.values()).slice(0, data.capLeads);
-    } else {
-      rawLeads = await scrollAndCollect(SOURCES[data.sourceType], collectOpts);
+    } catch (err) {
+      await savePartialLeads(data, err);
+      throw err;
     }
 
-    const enrichedLeads = await enrichLeadsFromProfiles(page, rawLeads, {
-      minDelayMs: env.PROFILE_DELAY_MIN_MS,
-      maxDelayMs: env.PROFILE_DELAY_MAX_MS,
-    });
-    const savedLeads = await upsertLeads(data.userId, data.sourceType, data.sourceRef, enrichedLeads);
-    // The leads are already persisted at this point. Recording exact per-job membership is a
-    // nice-to-have on top of that, so a failure here must not throw: doing so marked a successful
-    // scrape "failed" and let BullMQ re-run the entire Playwright scrape up to `attempts` times,
-    // burning the account's daily quota and hitting X again for leads already collected.
+    let enrichedLeads: RawLead[];
     try {
-      await saveScrapeJobLeadIds(data.userId, data.scrapeJobId, savedLeads.map((lead) => lead.id));
+      enrichedLeads = await enrichLeadsFromProfiles(page, rawLeads, {
+        minDelayMs: env.PROFILE_DELAY_MIN_MS,
+        maxDelayMs: env.PROFILE_DELAY_MAX_MS,
+      });
     } catch (err) {
-      logger.warn(
-        { err, scrapeJobId: data.scrapeJobId },
-        "could not record exact lead membership; leads were saved and the job still counts as completed"
-      );
+      // Enrichment stopped early (throttled part-way through the profile visits). The list-view
+      // leads are complete and already in hand — save them rather than losing the whole run.
+      attachPartialLeads(err, rawLeads);
+      await savePartialLeads(data, err);
+      throw err;
     }
-    return { leadsFound: savedLeads.length };
+
+    return { leadsFound: await persistLeads(data, enrichedLeads) };
   } finally {
     await closeScrapeSession(session);
   }
@@ -155,17 +202,27 @@ export function startScrapeWorker(): Worker<ScrapeJobData> {
         });
       } catch (err) {
         if (isAccountHealthError(err)) {
+          const leadsFound = getPartialLeadsSaved(err);
           await setAccountStatus(xAccountId, "checkpointed");
-          await markJobStatus(scrapeJobId, "paused", `Account checkpointed: ${err.message}`);
+          await markJobStatus(scrapeJobId, "paused", `Account checkpointed: ${err.message}`, {
+            finishedAt: new Date(),
+            leadsFound,
+          });
           await logActivity(job.data.userId, "account.checkpointed", {
             xAccountId,
             reason: err.message,
+            leadsFound,
           });
           return; // terminal — do not let BullMQ retry a checkpointed account
         }
 
         const message = err instanceof Error ? err.message : String(err);
-        await markJobStatus(scrapeJobId, "failed", message, { finishedAt: new Date() });
+        await markJobStatus(scrapeJobId, "failed", message, {
+          finishedAt: new Date(),
+          // A run that died part-way may still have saved what it collected — report that rather
+          // than a bare 0 next to the error.
+          leadsFound: getPartialLeadsSaved(err),
+        });
         throw err; // real error: let BullMQ's attempts/backoff apply
       } finally {
         await releaseAccountSlot(slot);
