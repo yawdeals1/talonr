@@ -252,7 +252,8 @@ export function TriggerScrape() {
             Result filters <span className="font-normal text-zinc-400">(optional)</span>
           </legend>
           <p className="text-xs text-zinc-500">
-            Talonr still saves every collected lead. These filters control which leads are shown when the scrape opens.
+            Set these and the scrape keeps checking profiles until it has a full lead cap of accounts that match,
+            instead of stopping at the first accounts in the list. Every profile it checks is still saved.
           </p>
 
           <div className="grid grid-cols-2 gap-3">

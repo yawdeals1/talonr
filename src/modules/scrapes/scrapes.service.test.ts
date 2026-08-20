@@ -176,6 +176,30 @@ describe("scrapes.service ownership isolation", () => {
     );
   });
 
+  it("createScrapeJob: hands the result filter to the worker so the run aims for matching leads", async () => {
+    // Without this the filter only ever hid rows after the fact: the run still spent its whole
+    // lead cap on the first accounts in the list, so a narrow range came back nearly empty.
+    studioGet.mockResolvedValue(ownedAccount);
+    studioInsert.mockImplementation(async (table: string) => (table === "scrape_jobs" ? ownedJob : resultStore));
+
+    await createScrapeJob(OWNER, {
+      xAccountId: ACCOUNT_ID,
+      sourceType: "search",
+      sourceRef: "keyword",
+      capLeads: 10,
+      resultFilterDefinition: { minFollowers: 100, maxFollowers: 2_000 },
+    });
+
+    expect(queueAdd).toHaveBeenCalledWith(
+      "scrape",
+      expect.objectContaining({
+        capLeads: 10,
+        resultFilter: { minFollowers: 100, maxFollowers: 2_000 },
+      }),
+      { jobId: JOB_ID }
+    );
+  });
+
   it("getScrapeJob: a different user gets NotFoundError instead of the row", async () => {
     studioGet.mockResolvedValue(ownedJob);
     await expect(getScrapeJob(ATTACKER, JOB_ID)).rejects.toBeInstanceOf(NotFoundError);

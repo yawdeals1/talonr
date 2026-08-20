@@ -1,9 +1,10 @@
 import { DelayedError, Worker } from "bullmq";
 import { env } from "../../config/env.js";
 import { studioGet, studioUpdate } from "../../db/studio-client.js";
-import type { EngagementType, ScrapeJob, XAccount } from "../../db/schema.js";
+import type { EngagementType, ScrapeJob, ScrapeResultFilter, XAccount } from "../../db/schema.js";
 import { logger } from "../../lib/logger.js";
 import { logActivity } from "../../modules/activity/activity.service.js";
+import { buildFilterPredicate } from "../../modules/lead-lists/filter-query-builder.js";
 import { upsertLeads } from "../../modules/leads/leads.service.js";
 import { saveScrapeJobLeadIds } from "../../modules/scrapes/scrape-results.service.js";
 import { closeScrapeSession, launchScrapeSession } from "../../scraper/browser.js";
@@ -97,6 +98,29 @@ async function savePartialLeads(data: ScrapeJobData, err: unknown): Promise<void
   }
 }
 
+/**
+ * How many candidate profiles a filtered run may visit per lead it's asked for.
+ *
+ * A follower range only means something if the run keeps looking until it has that many matching
+ * accounts — collecting the first `capLeads` accounts in the list and filtering afterwards left a
+ * "100–2000 followers, 10 leads" scrape showing 2 rows, which is what "the filter doesn't work"
+ * looked like from the outside. The multiplier is what stops that turning into an unbounded crawl:
+ * with the default, a 10-lead filtered scrape visits at most 50 profiles and then reports whatever
+ * it found. Configurable via SCRAPE_FILTER_CANDIDATE_MULTIPLIER.
+ */
+function candidateCapFor(data: ScrapeJobData): number {
+  if (!hasResultFilter(data.resultFilter)) return data.capLeads;
+  return Math.min(data.capLeads * env.SCRAPE_FILTER_CANDIDATE_MULTIPLIER, MAX_CANDIDATE_LEADS);
+}
+
+function hasResultFilter(filter: ScrapeResultFilter | undefined): filter is ScrapeResultFilter {
+  return !!filter && Object.values(filter).some((value) => value !== undefined);
+}
+
+// Ceiling on the candidate pool regardless of cap × multiplier, matching the per-job cap the API
+// accepts (scrapes.controller.ts#createSchema).
+const MAX_CANDIDATE_LEADS = 1000;
+
 async function runScrape(data: ScrapeJobData): Promise<{ leadsFound: number }> {
   const account = await studioGet<XAccount>("x_accounts", data.xAccountId);
   if (!account) throw new Error(`X account ${data.xAccountId} not found`);
@@ -112,10 +136,11 @@ async function runScrape(data: ScrapeJobData): Promise<{ leadsFound: number }> {
   const session = await launchScrapeSession(storageState, proxy);
   try {
     const page = await session.context.newPage();
+    const candidateCap = candidateCapFor(data);
     const collectOpts = {
       page,
       sourceRef: data.sourceRef,
-      capLeads: data.capLeads,
+      capLeads: candidateCap,
       minScrollDelayMs: env.SCROLL_DELAY_MIN_MS,
       maxScrollDelayMs: env.SCROLL_DELAY_MAX_MS,
     };
@@ -131,7 +156,7 @@ async function runScrape(data: ScrapeJobData): Promise<{ leadsFound: number }> {
         for (const type of data.engagementTypes ?? []) {
           await scrollAndCollect(ENGAGEMENT_SOURCES[type], { ...collectOpts, into: merged });
         }
-        rawLeads = Array.from(merged.values()).slice(0, data.capLeads);
+        rawLeads = Array.from(merged.values()).slice(0, candidateCap);
       } else {
         rawLeads = await scrollAndCollect(SOURCES[data.sourceType], collectOpts);
       }
@@ -145,11 +170,18 @@ async function runScrape(data: ScrapeJobData): Promise<{ leadsFound: number }> {
       enrichedLeads = await enrichLeadsFromProfiles(page, rawLeads, {
         minDelayMs: env.PROFILE_DELAY_MIN_MS,
         maxDelayMs: env.PROFILE_DELAY_MAX_MS,
+        // With a filter on the job, aim for capLeads *matching* leads out of the larger candidate
+        // pool collected above; the enricher stops as soon as it has them.
+        ...(hasResultFilter(data.resultFilter)
+          ? { target: { matches: buildFilterPredicate(data.resultFilter), count: data.capLeads } }
+          : {}),
       });
     } catch (err) {
-      // Enrichment stopped early (throttled part-way through the profile visits). The list-view
-      // leads are complete and already in hand — save them rather than losing the whole run.
-      attachPartialLeads(err, rawLeads);
+      // Enrichment stopped early (throttled part-way through the profile visits). Anything it
+      // already enriched rides out on the error; only if it got through none of them do the
+      // list-view leads stand in — and then only up to what the job actually asked for, since the
+      // candidate pool is deliberately oversized and its tail was never visited.
+      if (getPartialLeads(err).length === 0) attachPartialLeads(err, rawLeads.slice(0, data.capLeads));
       await savePartialLeads(data, err);
       throw err;
     }

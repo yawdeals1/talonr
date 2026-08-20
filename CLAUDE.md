@@ -162,9 +162,16 @@ configurable. `followers`/`location` remain nullable because profiles can omit t
 best-effort, so `leads.service.ts#upsertLeads` merges rather than overwrites on re-scrape — a run
 whose enrichment failed must not null out a follower count/location already on file, or the lead
 silently drops out of every range filter. Follower counts come from `pickFollowerCount`, which
-prefers the stats link's exact `aria-label`/`title` ("6,412,338 Followers") over its rounded text
-("6.4M"): reading the rounded value made an account with 999 followers store as 1000 and pass a
-`minFollowers: 1000` filter it should have failed.
+takes every rendering of the number found on the stats link — the anchor's attributes, **every
+descendant's `aria-label`/`title`**, and the link text — and keeps whichever has the most digits,
+i.e. the least rounding. X puts the exact count on a descendant span
+(`<a href="/x/verified_followers"><span title="51,132">51.1K</span> Followers</a>`), so reading
+only the anchor's own attributes stored every account over ~10k rounded to three significant
+digits (51,132 saved as 51,100), and made an account with 999 followers store as 1000 and pass a
+`minFollowers: 1000` filter it should have failed. `UserName` is not a sufficient hydration gate
+either — the stats row renders after it, so `profile-enricher.ts` waits for the followers link and
+retries a profile once when the count still came back null, since a null-follower lead is invisible
+to every follower-range filter.
 
 ## Auth (`src/modules/auth/`)
 
@@ -306,6 +313,17 @@ keyed by lowercased handle, `page.mouse.wheel` scroll, random delay from
 `SCROLL_DELAY_MIN_MS`/`SCROLL_DELAY_MAX_MS`. After collection, `profile-enricher.ts` visits every
 unique profile sequentially using `PROFILE_DELAY_MIN_MS`/`PROFILE_DELAY_MAX_MS`, merges bio,
 followers, location, verification, and avatar, then the worker upserts the complete leads.
+
+**A job's result filter steers the run, it doesn't just hide rows afterwards.** When
+`POST /scrapes` carried a `resultFilterDefinition`, it rides on the BullMQ job (`ScrapeJobData`'s
+`resultFilter`) and `scrape.worker.ts` collects a *candidate pool* of
+`capLeads × SCRAPE_FILTER_CANDIDATE_MULTIPLIER` (hard-capped at 1000) instead of `capLeads`, then
+hands `enrichLeadsFromProfiles` a `target` so it stops as soon as `capLeads` enriched leads match.
+Leads are still written unfiltered — every profile actually visited is saved, matching or not; the
+filter only decides how long the run keeps looking. Without it, a "100–2000 followers, 10 leads"
+scrape enriched the first 10 accounts in the list and displayed the 2 that happened to match,
+which is what "the follower filter doesn't work" looked like from the outside. The multiplier is
+the bound that stops this becoming an unbounded crawl.
 `detectors.ts#checkHealth` checks URL patterns
 (login/challenge/lockdown redirects), a captcha iframe selector, and X's own status text;
 `watchForRateLimitResponses` listens for HTTP 429s and is wired into **both** the collection phase
@@ -366,7 +384,7 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 | POST | /accounts/session | connect token | `scripts/login.ts` posts a captured `storageState`/proxy back here, authenticated by the connect token instead of a Deploro session — listed in `app.ts`'s `PUBLIC_API_PATHS` for that reason, not because it's actually open |
 | PATCH | /accounts/:id | auth | Update dailyScrapeLimit / maxConcurrency / status |
 | DELETE | /accounts/:id | auth | Delete own account (cascades scrape_jobs) |
-| POST | /scrapes | auth | Create a scrape_jobs row + enqueue BullMQ job (`xAccountId`, `sourceType`: `search`\|`followers`\|`engagers`, `sourceRef`, `engagementTypes?` required for `engagers`, `capLeads?`) — rate-limited per user |
+| POST | /scrapes | auth | Create a scrape_jobs row + enqueue BullMQ job (`xAccountId`, `sourceType`: `search`\|`followers`\|`engagers`, `sourceRef`, `engagementTypes?` required for `engagers`, `capLeads?`, `resultFilterDefinition?` — a follower/location filter that both steers the run toward `capLeads` matching leads and becomes the job's saved results view) — rate-limited per user |
 | GET | /scrapes | auth | List own jobs, filterable by `status`/`xAccountId` |
 | GET | /scrapes/:id | auth | Job detail/status |
 | POST | /scrapes/:id/cancel | auth | Removes from queue if still waiting/delayed; best-effort if already running |
@@ -412,7 +430,9 @@ avoiding a same-host NAT hairpin round trip), `SESSION_ENCRYPTION_KEY` (32 bytes
 `{DEPLORO_AUTH_BASE_URL}/api/projects/{id}/studio`), `DEPLORO_STUDIO_API_TOKEN` (a project-scoped
 Deploro PAT — `deploro token create <name> --project talonr`), `PORT`, `NODE_ENV`, `COOKIE_SECURE`,
 `ALLOWED_ORIGIN`, `WORKER_CONCURRENCY`, `DEFAULT_DAILY_SCRAPE_LIMIT`,
-`DEFAULT_MAX_CONCURRENCY_PER_ACCOUNT`, `SCRAPE_CAP_LEADS_DEFAULT`, `SCROLL_DELAY_MIN_MS`,
+`DEFAULT_MAX_CONCURRENCY_PER_ACCOUNT`, `SCRAPE_CAP_LEADS_DEFAULT`,
+`SCRAPE_FILTER_CANDIDATE_MULTIPLIER` (1–20, default 5 — candidate profiles visited per requested
+lead when a scrape carries a result filter; see "Scraper modules"), `SCROLL_DELAY_MIN_MS`,
 `SCROLL_DELAY_MAX_MS`, `PROFILE_DELAY_MIN_MS`, `PROFILE_DELAY_MAX_MS`. All validated at boot by
 `src/config/env.ts` (zod) — the process throws
 immediately on an invalid/missing var rather than failing later. No `DATABASE_URL` — there is no

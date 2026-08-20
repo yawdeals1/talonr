@@ -39,4 +39,12 @@ describe("pickFollowerCount", () => {
     expect(pickFollowerCount(null, null)).toBeNull();
     expect(pickFollowerCount("Followers", null)).toBeNull();
   });
+
+  it("finds the exact count when it sits on a descendant of the stats link", () => {
+    // The real DOM: <a href="/x/verified_followers"><span title="51,132">51.1K</span> Followers</a>.
+    // Only reading the anchor's own attributes stored every account over ~10k rounded to three
+    // significant digits — 51,132 saved as 51,100 — which a follower bound then compared against.
+    expect(pickFollowerCount(...["51,132", "51.1K Followers"])).toBe(51_132);
+    expect(pickFollowerCount(...["324,517", "324.5K Followers"])).toBe(324_517);
+  });
 });

@@ -63,6 +63,7 @@ export async function createScrapeJob(userId: string, input: CreateScrapeInput) 
       sourceRef: input.sourceRef,
       engagementTypes: input.engagementTypes,
       capLeads: input.capLeads ?? env.SCRAPE_CAP_LEADS_DEFAULT,
+      resultFilter: input.resultFilterDefinition,
     },
     { jobId: job.id }
   );

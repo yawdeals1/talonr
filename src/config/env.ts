@@ -30,6 +30,11 @@ const envSchema = z.object({
   DEFAULT_DAILY_SCRAPE_LIMIT: z.coerce.number().int().positive().default(150),
   DEFAULT_MAX_CONCURRENCY_PER_ACCOUNT: z.coerce.number().int().positive().default(1),
   SCRAPE_CAP_LEADS_DEFAULT: z.coerce.number().int().positive().default(150),
+  // How many candidate profiles a scrape carrying a follower/location filter may visit per lead it
+  // was asked for, so it can keep looking until it has that many *matching* leads instead of
+  // filtering the first N accounts in the list down to a handful. Raising it finds more matches in
+  // one run at the cost of proportionally more requests to X — see scrape.worker.ts#candidateCapFor.
+  SCRAPE_FILTER_CANDIDATE_MULTIPLIER: z.coerce.number().int().min(1).max(20).default(5),
   SCROLL_DELAY_MIN_MS: z.coerce.number().int().positive().default(1500),
   SCROLL_DELAY_MAX_MS: z.coerce.number().int().positive().default(4000),
   // Profile visits provide follower count/location/bio after list collection. Kept separate from

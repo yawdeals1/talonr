@@ -1,5 +1,5 @@
 import { Queue } from "bullmq";
-import type { EngagementType } from "../db/schema.js";
+import type { EngagementType, ScrapeResultFilter } from "../db/schema.js";
 import { redisConnection } from "./connection.js";
 
 export interface ScrapeJobData {
@@ -11,6 +11,13 @@ export interface ScrapeJobData {
   // Required (non-empty) when sourceType is "engagers"; unused otherwise.
   engagementTypes?: EngagementType[];
   capLeads: number;
+  /**
+   * The follower/location filter the job was created with, if any. Carried on the job so the run
+   * itself can aim for `capLeads` *matching* leads rather than collecting the first `capLeads`
+   * accounts in the list and leaving the filter to hide most of them afterwards. Optional: jobs
+   * enqueued before this existed simply don't have it.
+   */
+  resultFilter?: ScrapeResultFilter;
 }
 
 export const SCRAPE_QUEUE_NAME = "scrape";

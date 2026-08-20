@@ -214,8 +214,15 @@ export function ScrapeJobDetail() {
 
       <dl className="grid grid-cols-2 gap-4 rounded-lg border p-4 text-sm sm:grid-cols-4">
         <div>
-          <dt className="text-xs text-zinc-500">Leads found</dt>
-          <dd className="font-mono text-base">{formatNumber(job.leadsFound)}</dd>
+          {/* A filtered run checks more profiles than it needs so it can find a full cap of
+              matching accounts, and saves every one it checked — so "found" and "matching" are
+              two different numbers whenever a filter is set. */}
+          <dt className="text-xs text-zinc-500">{hasLeadFilters ? "Matching / checked" : "Leads found"}</dt>
+          <dd className="font-mono text-base">
+            {hasLeadFilters
+              ? `${formatNumber(matchedLeadCount)} / ${formatNumber(job.leadsFound)}`
+              : formatNumber(job.leadsFound)}
+          </dd>
         </div>
         <div>
           <dt className="text-xs text-zinc-500">Created</dt>
