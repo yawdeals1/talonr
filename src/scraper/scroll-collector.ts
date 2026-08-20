@@ -12,10 +12,33 @@ import {
 const MAX_STAGNANT_ROUNDS = 4;
 const MAX_OPEN_ATTEMPTS = 3;
 const OPEN_RETRY_DELAY_MS = 4000;
+const DEFAULT_RATE_LIMIT_TOLERANCE = 3;
+const DEFAULT_RATE_LIMIT_BACKOFF_MS = 20_000;
+// Longest a back-off sleeps before asking the checkpoint whether the run is still wanted, so a
+// cancel lands within seconds even while the run is waiting out a throttle.
+const BACKOFF_SLICE_MS = 5_000;
 
 function randomDelay(minMs: number, maxMs: number): Promise<void> {
   const delay = minMs + Math.random() * (maxMs - minMs);
   return new Promise((resolve) => setTimeout(resolve, delay));
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Waits out a throttle without going deaf to the user.
+ *
+ * A back-off runs into the tens of seconds, and sleeping through it in one call would leave a
+ * cancel sitting unanswered for that whole time — so it is slept in slices with the run's
+ * checkpoint consulted between them, which is what raises ScrapeCancelledError.
+ */
+async function backOff(ms: number, ctx: ScrapeSourceContext): Promise<void> {
+  for (let remaining = ms; remaining > 0; remaining -= BACKOFF_SLICE_MS) {
+    await sleep(Math.min(remaining, BACKOFF_SLICE_MS));
+    if ((await ctx.checkpoint?.()) === "finish") return;
+  }
 }
 
 /**
@@ -71,12 +94,13 @@ export async function scrollAndCollect(source: ScrapeSource, ctx: ScrapeSourceCo
   const collected = () => Array.from(seen.values()).slice(0, ctx.capLeads);
 
   // HTTP 429 is the authoritative throttling signal — unambiguous, and impossible to fake from page
-  // content. It was only wired into profile enrichment, leaving the collection phase to rely
-  // entirely on matching text against the DOM.
-  let rateLimitStatus: number | null = null;
-  const stopWatching = watchForRateLimitResponses(ctx.page, (status) => {
-    rateLimitStatus = status;
-  });
+  // content. It is read once per round rather than latched on the first one: X's SPA fires plenty
+  // of background requests that have nothing to do with this list, so one of them being throttled
+  // is not the same as the session being throttled. Consecutive throttled rounds are.
+  const rateLimit = watchForRateLimitResponses(ctx.page);
+  const tolerance = ctx.rateLimitTolerance ?? DEFAULT_RATE_LIMIT_TOLERANCE;
+  const backoffMs = ctx.rateLimitBackoffMs ?? DEFAULT_RATE_LIMIT_BACKOFF_MS;
+  let throttledRounds = 0;
 
   try {
     await ctx.checkpoint?.();
@@ -89,7 +113,23 @@ export async function scrollAndCollect(source: ScrapeSource, ctx: ScrapeSourceCo
       // A cancel throws here and the catch below carries the collected leads out as partials; a
       // "finish" just ends the search, leaving what's collected to be enriched and saved.
       if ((await ctx.checkpoint?.()) === "finish") break;
-      if (rateLimitStatus !== null) throw new RateLimitedError(`X returned HTTP ${rateLimitStatus}`);
+
+      // Actually slow down when X asks us to, instead of walking away from the run. Only if the
+      // back-off doesn't help — several rounds running — is this a throttle worth ending on.
+      if (rateLimit.take() > 0) {
+        throttledRounds += 1;
+        if (throttledRounds >= tolerance) {
+          throw new RateLimitedError(`X returned HTTP 429 on ${throttledRounds} consecutive rounds`);
+        }
+        const wait = backoffMs * 2 ** (throttledRounds - 1);
+        logger.warn(
+          { sourceRef: ctx.sourceRef, throttledRounds, waitMs: wait },
+          "X returned HTTP 429; backing off before the next round"
+        );
+        await backOff(wait, ctx);
+        continue;
+      }
+      throttledRounds = 0;
 
       try {
         await checkHealth(ctx.page);
@@ -124,7 +164,7 @@ export async function scrollAndCollect(source: ScrapeSource, ctx: ScrapeSourceCo
     attachPartialLeads(err, collected());
     throw err;
   } finally {
-    stopWatching();
+    rateLimit.stop();
   }
 
   return collected();

@@ -25,12 +25,14 @@ import {
   getPartialLeadsSaved,
   isAccountHealthError,
   isScrapeCancelledError,
+  RateLimitedError,
   setPartialLeadsSaved,
   type RawLead,
   type ScrapeSource,
 } from "../../scraper/types.js";
 import { redisConnection } from "../connection.js";
 import { SCRAPE_QUEUE_NAME, type ScrapeJobData } from "../queues.js";
+import { getAccountCooldown, startAccountCooldown } from "../rate-limit/account-cooldown.js";
 import { acquireAccountSlot, releaseAccountSlot } from "../rate-limit/account-semaphore.js";
 import { tryConsumeDailyQuota } from "../rate-limit/daily-quota.js";
 
@@ -57,6 +59,15 @@ async function markJobStatus(
 
 async function setAccountStatus(xAccountId: string, status: "active" | "checkpointed" | "banned") {
   await studioUpdate<XAccount>("x_accounts", xAccountId, { status });
+}
+
+/**
+ * Records why a job is sitting in the queue without moving it out of `queued` — a job waiting out
+ * a rate-limit cooldown has not failed and will run on its own, so the status would be a lie, but
+ * a queued job with no explanation looks stuck from the job page.
+ */
+async function noteJobWaiting(scrapeJobId: string, message: string) {
+  await studioUpdate<ScrapeJob>("scrape_jobs", scrapeJobId, { errorMessage: message });
 }
 
 async function touchAccountLastUsed(xAccountId: string) {
@@ -233,6 +244,8 @@ async function runScrape(data: ScrapeJobData, sink: LeadSink): Promise<{ leadsFo
       capLeads: candidateCap,
       minScrollDelayMs: env.SCROLL_DELAY_MIN_MS,
       maxScrollDelayMs: env.SCROLL_DELAY_MAX_MS,
+      rateLimitTolerance: env.RATE_LIMIT_TOLERANCE,
+      rateLimitBackoffMs: env.RATE_LIMIT_BACKOFF_MS,
       checkpoint,
       onProgress: (count: number) => sink.noteCollected(count),
     };
@@ -263,6 +276,8 @@ async function runScrape(data: ScrapeJobData, sink: LeadSink): Promise<{ leadsFo
       await enrichLeadsFromProfiles(page, rawLeads, {
         minDelayMs: env.PROFILE_DELAY_MIN_MS,
         maxDelayMs: env.PROFILE_DELAY_MAX_MS,
+        rateLimitTolerance: env.RATE_LIMIT_TOLERANCE,
+        rateLimitBackoffMs: env.RATE_LIMIT_BACKOFF_MS,
         checkpoint,
         onEnriched: (lead, matched) => sink.accept(lead, matched),
         // With a filter on the job, aim for capLeads *matching* leads out of the larger candidate
@@ -309,6 +324,20 @@ export function startScrapeWorker(): Worker<ScrapeJobData> {
         return;
       }
 
+      // X throttled this account recently. Wait the window out rather than failing the job: the
+      // session is still valid, so this run will simply work later without anyone touching it.
+      const cooldown = await getAccountCooldown(xAccountId);
+      if (cooldown) {
+        const resumeAt = cooldown.until.getTime() + Math.floor(Math.random() * 5000);
+        await noteJobWaiting(
+          scrapeJobId,
+          `Waiting out X's rate limit on this account until ${cooldown.until.toISOString()} — this job will start on its own.`
+        ).catch((err: unknown) => logger.warn({ err, scrapeJobId }, "could not record the cooldown wait"));
+        logger.info({ scrapeJobId, xAccountId, resumeAt }, "account is cooling down; deferring the job");
+        await job.moveToDelayed(resumeAt, token);
+        throw new DelayedError();
+      }
+
       const slot = await acquireAccountSlot(xAccountId, account.maxConcurrency);
       if (!slot) {
         const jitterMs = 3000 + Math.floor(Math.random() * 5000);
@@ -352,6 +381,33 @@ export function startScrapeWorker(): Worker<ScrapeJobData> {
             leadsFound,
           });
           return; // terminal — a cancelled scrape must never be retried
+        }
+
+        // A rate limit is not a broken session — X is asking for less traffic, and the window
+        // clears on its own. Checkpointing here meant `updateAccount` then refused to reactivate
+        // the account, so every throttled run cost a full interactive re-login that re-proved
+        // credentials nothing had questioned. Rest the account instead and leave it connected.
+        if (err instanceof RateLimitedError) {
+          const leadsFound = getPartialLeadsSaved(err);
+          const rest = await startAccountCooldown(
+            xAccountId,
+            err.message,
+            env.RATE_LIMIT_COOLDOWN_MINUTES,
+            env.RATE_LIMIT_COOLDOWN_MAX_MINUTES
+          );
+          await markJobStatus(
+            scrapeJobId,
+            "paused",
+            `X rate-limited this run. The account stays connected and rests until ${rest.until.toISOString()} — no reconnect needed. (${err.message})`,
+            { finishedAt: new Date(), leadsFound }
+          );
+          await logActivity(job.data.userId, "account.rate_limited", {
+            xAccountId,
+            reason: err.message,
+            restingUntil: rest.until.toISOString(),
+            leadsFound,
+          });
+          return; // terminal for this job — the next one waits out the cooldown and runs itself
         }
 
         if (isAccountHealthError(err)) {

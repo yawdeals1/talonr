@@ -35,6 +35,19 @@ const envSchema = z.object({
   // filtering the first N accounts in the list down to a handful. Raising it finds more matches in
   // one run at the cost of proportionally more requests to X — see scrape.worker.ts#candidateCapFor.
   SCRAPE_FILTER_CANDIDATE_MULTIPLIER: z.coerce.number().int().min(1).max(20).default(5),
+  // How a rate limit is answered. A 429 parks the account in a temporary cooldown
+  // (queue/rate-limit/account-cooldown.ts) instead of checkpointing it, so jobs wait the window out
+  // and resume on their own — X's throttling says nothing about whether the session is still valid,
+  // and a checkpoint can only be cleared by a full interactive re-login.
+  RATE_LIMIT_COOLDOWN_MINUTES: z.coerce.number().int().positive().default(15),
+  // Repeat throttles inside the strike window double the wait, up to this ceiling.
+  RATE_LIMIT_COOLDOWN_MAX_MINUTES: z.coerce.number().int().positive().default(120),
+  // How many consecutive throttled rounds/profiles a run tolerates — backing off between each —
+  // before it gives up and starts a cooldown. X's SPA fires plenty of background requests, so a
+  // single stray 429 is not evidence the account is being throttled; several in a row is.
+  RATE_LIMIT_TOLERANCE: z.coerce.number().int().min(1).max(10).default(3),
+  // First back-off after a throttled round, doubled for each consecutive one.
+  RATE_LIMIT_BACKOFF_MS: z.coerce.number().int().positive().default(20_000),
   SCROLL_DELAY_MIN_MS: z.coerce.number().int().positive().default(1500),
   SCROLL_DELAY_MAX_MS: z.coerce.number().int().positive().default(4000),
   // Profile visits provide follower count/location/bio after list collection. Kept separate from

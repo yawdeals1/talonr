@@ -29,6 +29,15 @@ export function updateAccount(id: string, input: UpdateAccountInput): Promise<{ 
   return apiFetch(`/accounts/${id}`, { method: "PATCH", body: input });
 }
 
+/**
+ * Asks the backend to verify a checkpointed account's saved session against X, instead of the user
+ * re-running the login script. Returns immediately — the check runs in the worker, so the verdict
+ * shows up on the account itself (`status` flips to active, or `sessionCheck` explains why not).
+ */
+export function revalidateAccount(id: string): Promise<{ account: XAccount }> {
+  return apiFetch(`/accounts/${id}/revalidate`, { method: "POST" });
+}
+
 export function deleteAccount(id: string): Promise<void> {
   return apiFetch(`/accounts/${id}`, { method: "DELETE" });
 }

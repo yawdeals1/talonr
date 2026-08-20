@@ -11,6 +11,7 @@ import {
   getAccount,
   getConnectToken,
   listAccounts,
+  requestAccountRevalidation,
   saveAccountSession,
   updateAccount,
 } from "./accounts.service.js";
@@ -61,6 +62,14 @@ export async function update(req: AuthedRequest, res: Response) {
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Invalid request");
   res.json({ account: await updateAccount(req.user!.id, req.params.id, parsed.data) });
+}
+
+// Queues a live session check against X. Returns 202 rather than the verdict: the check runs in
+// the worker process (the only one with Playwright and session decryption), so the answer arrives
+// on the account itself — `status` flips to active when X confirms the session, and `sessionCheck`
+// carries the reason when it doesn't.
+export async function revalidate(req: AuthedRequest, res: Response) {
+  res.status(202).json({ account: await requestAccountRevalidation(req.user!.id, req.params.id) });
 }
 
 export async function remove(req: AuthedRequest, res: Response) {

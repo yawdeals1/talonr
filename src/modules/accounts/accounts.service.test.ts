@@ -1,7 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { XAccount } from "../../db/schema.js";
-import { NotFoundError } from "../../lib/errors.js";
-import { deleteAccount, getAccount, getConnectToken, saveAccountSession, updateAccount } from "./accounts.service.js";
+import { NotFoundError, ValidationError } from "../../lib/errors.js";
+import {
+  deleteAccount,
+  getAccount,
+  getConnectToken,
+  requestAccountRevalidation,
+  saveAccountSession,
+  updateAccount,
+} from "./accounts.service.js";
 
 // There's no database-level tenant isolation (RLS) on Deploro's Studio DB — every "fetch a row I
 // own" path is enforced purely in this service layer (findOwnedOrThrow-style checks). These tests
@@ -21,6 +28,26 @@ vi.mock("../../db/studio-client.js", () => ({
   studioInsert: (...args: unknown[]) => studioInsert(...args),
   studioUpdate: (...args: unknown[]) => studioUpdate(...args),
   studioDelete: (...args: unknown[]) => studioDelete(...args),
+}));
+
+// The account's cooldown and session-check state live in Redis, and requesting a re-check enqueues
+// BullMQ work. Mocked out here for the same reason the Studio client is: these tests are about the
+// ownership checks, and importing the real modules would open a live Redis connection.
+const queueAdd = vi.fn();
+vi.mock("../../queue/queues.js", () => ({
+  accountCheckQueue: { add: (...args: unknown[]) => queueAdd(...args) },
+}));
+vi.mock("../../queue/rate-limit/account-cooldown.js", () => ({
+  getAccountCooldown: vi.fn(async () => null),
+  getAccountCooldowns: vi.fn(async () => new Map()),
+  clearAccountCooldown: vi.fn(async () => undefined),
+}));
+const setAccountSessionCheck = vi.fn();
+vi.mock("./account-check.store.js", () => ({
+  getAccountSessionCheck: vi.fn(async () => null),
+  getAccountSessionChecks: vi.fn(async () => new Map()),
+  setAccountSessionCheck: (...args: unknown[]) => setAccountSessionCheck(...args),
+  clearAccountSessionCheck: vi.fn(async () => undefined),
 }));
 
 const OWNER = "owner-user-id";
@@ -105,5 +132,48 @@ describe("accounts.service ownership isolation", () => {
       ACCOUNT_ID,
       expect.objectContaining({ status: "active" })
     );
+  });
+
+  it("requestAccountRevalidation: a different user cannot queue a check on someone else's account", async () => {
+    studioGet.mockResolvedValue({ ...ownedAccount, status: "checkpointed", encryptedSession: "v1.a.b.c" });
+    await expect(requestAccountRevalidation(ATTACKER, ACCOUNT_ID)).rejects.toBeInstanceOf(NotFoundError);
+    expect(queueAdd).not.toHaveBeenCalled();
+  });
+});
+
+// A checkpoint must only ever be cleared by evidence, never by asking. These cover the request
+// side of that: what it refuses outright, and that a permitted request only ever *queues* a check
+// rather than changing the account's status itself.
+describe("accounts.service session re-check", () => {
+  const checkpointed: XAccount = { ...ownedAccount, status: "checkpointed", encryptedSession: "v1.a.b.c" };
+
+  it("queues a check for a checkpointed account without touching its status", async () => {
+    studioGet.mockResolvedValue(checkpointed);
+    const result = await requestAccountRevalidation(OWNER, ACCOUNT_ID);
+
+    expect(queueAdd).toHaveBeenCalledWith("check-session", { userId: OWNER, xAccountId: ACCOUNT_ID });
+    expect(setAccountSessionCheck).toHaveBeenCalledWith(ACCOUNT_ID, expect.objectContaining({ state: "queued" }));
+    // The verdict is the worker's to reach — asking for one changes nothing on its own.
+    expect(studioUpdate).not.toHaveBeenCalled();
+    expect(result.status).toBe("checkpointed");
+    expect(result.sessionCheck?.state).toBe("queued");
+  });
+
+  it("refuses an account with no saved session — there is nothing to verify", async () => {
+    studioGet.mockResolvedValue({ ...checkpointed, encryptedSession: null });
+    await expect(requestAccountRevalidation(OWNER, ACCOUNT_ID)).rejects.toBeInstanceOf(ValidationError);
+    expect(queueAdd).not.toHaveBeenCalled();
+  });
+
+  it("refuses a banned account, which records a human decision rather than a tripped signal", async () => {
+    studioGet.mockResolvedValue({ ...checkpointed, status: "banned" });
+    await expect(requestAccountRevalidation(OWNER, ACCOUNT_ID)).rejects.toBeInstanceOf(ValidationError);
+    expect(queueAdd).not.toHaveBeenCalled();
+  });
+
+  it("still refuses a plain status flip back to active, re-check or not", async () => {
+    studioGet.mockResolvedValue(checkpointed);
+    await expect(updateAccount(OWNER, ACCOUNT_ID, { status: "active" })).rejects.toBeInstanceOf(ValidationError);
+    expect(studioUpdate).not.toHaveBeenCalled();
   });
 });

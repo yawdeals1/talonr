@@ -128,13 +128,40 @@ export async function checkHealth(page: Page): Promise<void> {
   }
 }
 
-/** Attaches a response listener that flags HTTP-level rate-limit responses as they happen mid-scroll. */
-export function watchForRateLimitResponses(page: Page, onRateLimited: (status: number) => void): () => void {
+/**
+ * Counts HTTP 429 responses as they arrive, so a run can tell one stray throttled request apart
+ * from X actually pushing back on the session.
+ *
+ * This used to hand the caller a single latched status: the first 429 on *any* response set a flag
+ * that was never cleared, and the next loop iteration ended the run. X's SPA fires a lot of
+ * background requests that have nothing to do with the list being scraped, so one of them getting
+ * throttled killed an entire scrape — and, before rate limits became a cooldown, the account with
+ * it. Callers now read the count between rounds, back off while it is non-zero, and only escalate
+ * once several rounds in a row come back throttled.
+ */
+export interface RateLimitWatcher {
+  /** 429s seen since the last call, resetting the count. */
+  take(): number;
+  /** Detaches the listener. */
+  stop(): void;
+}
+
+export function watchForRateLimitResponses(page: Page): RateLimitWatcher {
+  let seen = 0;
+
   const handler = (response: import("playwright").Response) => {
-    if (response.status() === 429) {
-      onRateLimited(response.status());
-    }
+    if (response.status() === 429) seen += 1;
   };
   page.on("response", handler);
-  return () => page.off("response", handler);
+
+  return {
+    take() {
+      const count = seen;
+      seen = 0;
+      return count;
+    },
+    stop() {
+      page.off("response", handler);
+    },
+  };
 }

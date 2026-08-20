@@ -9,6 +9,16 @@ export interface User {
 
 export type XAccountStatus = "active" | "checkpointed" | "banned";
 
+/**
+ * The result of re-checking a checkpointed account's stored session against X, while it is still
+ * fresh. Short-lived by design — the durable outcome is the account's own `status`.
+ */
+export type AccountSessionCheck =
+  | { state: "queued"; at: string }
+  | { state: "checking"; at: string }
+  | { state: "healthy"; at: string }
+  | { state: "unhealthy"; at: string; reason: string };
+
 export interface XAccount {
   id: string;
   handle: string;
@@ -19,6 +29,13 @@ export interface XAccount {
   maxConcurrency: number;
   lastUsedAt: string | null;
   createdAt: string;
+  /**
+   * Set while X is throttling this account. It stays connected and stays `active` — it is simply
+   * resting, and queued scrapes start themselves once this passes. Not the same as `checkpointed`.
+   */
+  cooldownUntil: string | null;
+  cooldownReason: string | null;
+  sessionCheck: AccountSessionCheck | null;
 }
 
 /** Admin cross-user view — same shape as XAccount plus the owning user's id. */

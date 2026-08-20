@@ -4,7 +4,8 @@ import { getPartialLeads, ScrapeCancelledError, type RawLead } from "./types.js"
 
 const detectors = vi.hoisted(() => ({
   checkHealth: vi.fn(async () => undefined),
-  watchForRateLimitResponses: vi.fn(() => () => undefined),
+  // The watcher is a counter now, not a latch: take() reports 429s seen since the last read.
+  watchForRateLimitResponses: vi.fn(() => ({ take: () => 0, stop: () => undefined })),
 }));
 vi.mock("./detectors.js", () => detectors);
 

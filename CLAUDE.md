@@ -12,7 +12,12 @@ impersonation, never raw session cookies.
 Scope is X only (no LinkedIn/Telegram). This is a personal project. Automating X's non-public
 interface violates X's Terms of Service — keep scrape volume conservative and configurable, never
 hardcode aggressive defaults, and auto-pause an account on captcha/login-challenge/rate-limit
-signals rather than retrying blindly.
+signals rather than retrying blindly. Those signals are answered differently, and the difference
+matters: a captcha or login wall means X no longer trusts the *session*, so the account is
+`checkpointed` until it is verified again — while a rate limit means only "slow down", so the run
+backs off and, if X keeps pushing back, the account **rests on a cooldown and stays connected**
+(`queue/rate-limit/account-cooldown.ts`). Conflating the two made every 429 cost a full 45-minute
+interactive re-login that re-proved credentials nothing had questioned.
 
 A React + Vite frontend lives in `frontend/` (built from the Google Stitch design output —
 per-screen `code.html` + `screen.png`, dark variant plus a `*_light` counterpart for each, and a
@@ -44,8 +49,9 @@ root `dist/`, served by the same Worker deploy.
   `disposable-email.ts` coverage. `vitest.config.ts` stubs `config/env.ts`'s required vars so
   service modules import without real credentials.
 
-Two separate runtime entrypoints — `src/server.ts` (HTTP API) and `src/worker.ts` (BullMQ worker)
-— run as separate processes. Playwright workloads are heavy and shouldn't share an event loop with
+Two separate runtime entrypoints — `src/server.ts` (HTTP API) and `src/worker.ts` (BullMQ workers:
+the scrape worker plus the session-check worker, which shares the process because it needs the same
+Playwright and session decryption) — run as separate processes. Playwright workloads are heavy and shouldn't share an event loop with
 the HTTP server. Run both locally (`npm run dev` / `npm run dev:worker`) and deploy both in
 production.
 
@@ -62,7 +68,8 @@ src/
 │                                        client-side ordering (the Studio API has no ORDER BY)
 ├── modules/
 │   ├── auth/          routes, controller, service, middleware, deploro-auth.client.ts
-│   ├── accounts/       routes, controller, service       — X account CRUD, own-scoped
+│   ├── accounts/       routes, controller, service, account-check.store.ts
+│   │                                                     — X account CRUD, own-scoped
 │   ├── scrapes/        routes, controller, service, scrape-cancel.ts, scrape-results.service.ts
 │   │                                                      — trigger/list/detail/cancel scrape jobs
 │   ├── leads/           routes, controller, service       — read scraped leads + upsertLeads()
@@ -74,8 +81,11 @@ src/
 │   ├── queues.ts                     # scrapeQueue definition + ScrapeJobData type
 │   ├── rate-limit/
 │   │   ├── account-semaphore.ts      # Lua-scripted per-account concurrency slot (sorted-set based)
-│   │   └── daily-quota.ts            # Lua-scripted per-account daily counter
-│   └── workers/scrape.worker.ts      # Worker + processor: guard logic, scrape execution, lead upsert
+│   │   ├── daily-quota.ts            # Lua-scripted per-account daily counter
+│   │   └── account-cooldown.ts       # temporary "X is throttling this account" rest, TTL'd in Redis
+│   └── workers/
+│       ├── scrape.worker.ts          # Worker + processor: guard logic, scrape execution, lead upsert
+│       └── account-check.worker.ts   # re-verifies a checkpointed account's stored session against X
 ├── scraper/
 │   ├── types.ts                      # RawLead, ScrapeSource, ScrapeSourceContext, typed health errors
 │   ├── browser.ts                    # launches a Playwright context from decrypted storageState + proxy
@@ -132,7 +142,9 @@ against a large multi-tenant dataset.
   default `user`), created_at
 - **x_accounts**: id, user_id (FK→users, cascade), handle, encrypted_session (text, nullable —
   null until the login script runs), encrypted_proxy (text, nullable), status (enum
-  `active`|`checkpointed`|`banned`, default `active`), daily_scrape_limit (int, default 150),
+  `active`|`checkpointed`|`banned`, default `active` — a rate-limited account stays `active` and
+  rests on a Redis cooldown instead, see "Rate limits rest an account"), daily_scrape_limit (int,
+  default 150),
   max_concurrency (int, default 1), last_used_at, created_at. Unique on (user_id, handle).
 - **scrape_jobs**: id, user_id (FK), x_account_id (FK), source_type (enum
   `search`|`followers`|`likers`|`engagers` — `likers` is legacy-only: X made "who liked a post"
@@ -278,11 +290,54 @@ delays (3–8s jitter) instead of starving other accounts' jobs, since the share
 ceiling is filled fairly by whichever accounts currently have free slots. Quota-exceeded jobs are
 marked `paused` (terminal for the day, no retry storm). Real errors (network blips, unexpected
 exceptions) use BullMQ's normal `attempts: 3` + exponential backoff (set in `queues.ts`'s
-`defaultJobOptions`). Captcha/login-challenge/rate-limit detection during a run
-(`isAccountHealthError`) sets the account to `checkpointed` and marks the job `paused` — terminal,
-no retry — per the safety requirement. A `checkpointed`/`banned` account can't be flipped straight
-back to `active` through `PATCH /accounts/:id` (`accounts.service.ts#updateAccount`) — that would
-let a user silently bypass the safety trip; resuming requires re-running the login script.
+`defaultJobOptions`). Captcha/login-challenge detection during a run sets the account to
+`checkpointed` and marks the job `paused` — terminal, no retry — per the safety requirement.
+A `checkpointed`/`banned` account can't be flipped straight back to `active` through
+`PATCH /accounts/:id` (`accounts.service.ts#updateAccount`) — that would let a user silently bypass
+the safety trip. Resuming means re-verifying the session: either re-run the login script, or
+`POST /accounts/:id/revalidate` (see "Recovering an account" below).
+
+### Rate limits rest an account; they don't checkpoint it
+
+`RateLimitedError` is handled **before** the checkpoint branch in `scrape.worker.ts`, because a 429
+says nothing about whether the session is still valid — X's throttle window clears on its own
+within minutes and the cookies stay good the whole time. It calls `startAccountCooldown` instead:
+the account keeps `status: "active"`, and a Redis key (`cooldown:xaccount:{id}`, TTL
+`RATE_LIMIT_COOLDOWN_MINUTES`, doubling per repeat throttle inside a 6h strike window up to
+`RATE_LIMIT_COOLDOWN_MAX_MINUTES`) records the rest. The processor reads that key before it spends
+a quota slot or launches a browser and `moveToDelayed`s the job until it expires, so a queued
+scrape **starts itself** once X is ready and the user does nothing at all. Redis rather than a
+status value because the state is inherently TTL'd — and because `x_accounts.status` is a Postgres
+enum owned by a role this app's connection isn't a member of, so it couldn't be extended from here
+anyway (the same constraint documented under "Cancelling a run").
+
+**One 429 is not a throttled session.** X's SPA fires many background requests that have nothing to
+do with the list being scraped, and `watchForRateLimitResponses` used to latch the first 429 from
+any of them permanently, ending the whole run — and, before this split, burning the account with
+it. It is now a counter read once per scroll round / profile visit: a throttled round triggers a
+back-off (`RATE_LIMIT_BACKOFF_MS`, doubling) and the run carries on, and only
+`RATE_LIMIT_TOLERANCE` *consecutive* throttled rounds raise `RateLimitedError`. Back-offs sleep in
+≤5s slices with the run's `checkpoint` consulted between them, so a cancel still lands in seconds.
+
+### Recovering an account (`queue/workers/account-check.worker.ts`)
+
+`POST /accounts/:id/revalidate` is the way out of a genuine checkpoint without the 45-minute
+re-login. It is **not** a bypass of the `updateAccount` guard — it performs that guard's
+verification instead of skipping it: the worker decrypts the stored session, loads
+`https://x.com/home`, runs the same `checkHealth` the scraper trusts, and then waits for a selector
+only a signed-in session renders. That last step matters — `checkHealth` passing only means X
+didn't challenge us, and quietly expired cookies still render a logged-out page with no signal at
+all. Only when X answers with a signed-in session does it set `status: "active"` and clear any
+cooldown; every other outcome leaves the account exactly as it was and reports why, so the failure
+path never weakens anything.
+
+It runs on its own queue (`accountCheckQueue`) inside the same worker process, since it needs the
+two things only that process has (Playwright, session decryption) but none of the scrape queue's
+quota/retry semantics — a session check must never spend the account's daily scrape budget. Its
+verdict is transient and lives in Redis (`accounts/account-check.store.ts`, 15m TTL) rather than a
+column: the durable half of the outcome is the account's own `status`, plus an `activity_log`
+entry. `banned` accounts are refused outright — that status is only ever set by hand, so it records
+a human decision a probe has no business overturning.
 
 ### Stopping a run: cancel vs. finish (`modules/scrapes/scrape-cancel.ts`)
 
@@ -378,9 +433,11 @@ saved, and the rows themselves — instead of nothing at all until the whole scr
 (`scroll-collector.ts`) and profile enrichment — it's the authoritative throttling signal, since it
 can't be faked by page content.
 
-**Page-text detection must stay scoped and narrowly classified**, because a rate-limit match
-checkpoints the X account and `accounts.service.ts#updateAccount` refuses to flip a checkpointed
-account back to `active` — recovering from a false positive costs a full interactive re-login.
+**Page-text detection must stay scoped and narrowly classified**: a login-challenge match
+checkpoints the X account, and `accounts.service.ts#updateAccount` refuses to flip a checkpointed
+account back to `active`, so recovering from a false positive costs at least a session re-check and
+possibly a full interactive re-login (a rate-limit match is cheaper now — it only rests the
+account — but still stops the run).
 `collectSignalSnippets` (runs in-page; self-contained, no imports/closures, passed to
 `page.evaluate`) walks individual text nodes, skipping user-generated content
 (`UserCell`/`UserDescription`/`tweetText`/`User-Name`/`sidebarColumn`/`article`) and anything not
@@ -430,7 +487,8 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 | GET | /accounts/:id/connect-token | auth | Mint a short-lived (15 min), account-scoped connect token for `scripts/login.ts` |
 | GET | /accounts/login-script | public | `scripts/login.ts`'s raw source, plain text — no secrets in it, and fetched by a terminal command with no browser session, so it can't require auth |
 | POST | /accounts/session | connect token | `scripts/login.ts` posts a captured `storageState`/proxy back here, authenticated by the connect token instead of a Deploro session — listed in `app.ts`'s `PUBLIC_API_PATHS` for that reason, not because it's actually open |
-| PATCH | /accounts/:id | auth | Update dailyScrapeLimit / maxConcurrency / status |
+| PATCH | /accounts/:id | auth | Update dailyScrapeLimit / maxConcurrency / status (cannot reactivate a checkpointed/banned account — see below) |
+| POST | /accounts/:id/revalidate | auth | Queue a live check of a **checkpointed** account's stored session against X; reactivates it only if X answers with a signed-in session, otherwise leaves it alone and says why. The alternative to re-running the login script |
 | DELETE | /accounts/:id | auth | Delete own account (cascades scrape_jobs) |
 | POST | /scrapes | auth | Create a scrape_jobs row + enqueue BullMQ job (`xAccountId`, `sourceType`: `search`\|`followers`\|`engagers`, `sourceRef`, `engagementTypes?` required for `engagers`, `capLeads?`, `resultFilterDefinition?` — a follower/location filter that both steers the run toward `capLeads` matching leads and becomes the job's saved results view) — rate-limited per user |
 | GET | /scrapes | auth | List own jobs, filterable by `status`/`xAccountId` |
@@ -480,6 +538,11 @@ avoiding a same-host NAT hairpin round trip), `SESSION_ENCRYPTION_KEY` (32 bytes
 Deploro PAT — `deploro token create <name> --project talonr`), `PORT`, `NODE_ENV`, `COOKIE_SECURE`,
 `ALLOWED_ORIGIN`, `WORKER_CONCURRENCY`, `DEFAULT_DAILY_SCRAPE_LIMIT`,
 `DEFAULT_MAX_CONCURRENCY_PER_ACCOUNT`, `SCRAPE_CAP_LEADS_DEFAULT`,
+`RATE_LIMIT_COOLDOWN_MINUTES` (default 15) / `RATE_LIMIT_COOLDOWN_MAX_MINUTES` (default 120) — how
+long a 429 rests an account, and the ceiling repeat throttles escalate to;
+`RATE_LIMIT_TOLERANCE` (1–10, default 3) / `RATE_LIMIT_BACKOFF_MS` (default 20000) — consecutive
+throttled rounds a run backs off through before resting the account, and the first back-off's
+length (see "Rate limits rest an account");
 `SCRAPE_FILTER_CANDIDATE_MULTIPLIER` (1–20, default 5 — candidate profiles visited per requested
 lead when a scrape carries a result filter; see "Scraper modules"), `SCROLL_DELAY_MIN_MS`,
 `SCROLL_DELAY_MAX_MS`, `PROFILE_DELAY_MIN_MS`, `PROFILE_DELAY_MAX_MS`. All validated at boot by

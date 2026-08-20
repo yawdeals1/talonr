@@ -50,6 +50,13 @@ export interface ProfileEnrichmentOptions {
    * in while the run is still going instead of staying empty until it finishes.
    */
   onEnriched?: (lead: RawLead, matched: boolean) => Promise<void>;
+  /**
+   * How many consecutive throttled profiles to tolerate — backing off between each — before ending
+   * the run as rate-limited, and how long the first of those back-offs is. Owned by the worker
+   * (RATE_LIMIT_TOLERANCE / RATE_LIMIT_BACKOFF_MS) so this module needs no env import.
+   */
+  rateLimitTolerance?: number;
+  rateLimitBackoffMs?: number;
 }
 
 // One extra visit for a profile whose header never rendered. X's profile header hydrates after
@@ -58,9 +65,29 @@ export interface ProfileEnrichmentOptions {
 // deliberately keeping request volume low against.
 const PROFILE_ATTEMPTS = 2;
 
+const DEFAULT_RATE_LIMIT_TOLERANCE = 3;
+const DEFAULT_RATE_LIMIT_BACKOFF_MS = 20_000;
+// Longest a back-off sleeps before re-consulting the checkpoint, so a cancel isn't left waiting
+// out the whole throttle.
+const BACKOFF_SLICE_MS = 5_000;
+
 function randomDelay(minMs: number, maxMs: number): Promise<void> {
   const delay = minMs + Math.random() * Math.max(0, maxMs - minMs);
   return new Promise((resolve) => setTimeout(resolve, delay));
+}
+
+/**
+ * Waits out a throttle in slices, consulting the run's checkpoint between them.
+ *
+ * A back-off runs into the tens of seconds; sleeping through it in one call would leave a cancel
+ * unanswered for that whole time. The checkpoint raises ScrapeCancelledError, which the caller
+ * catches to attach the leads enriched so far.
+ */
+async function backOff(ms: number, options: ProfileEnrichmentOptions): Promise<void> {
+  for (let remaining = ms; remaining > 0; remaining -= BACKOFF_SLICE_MS) {
+    await new Promise((resolve) => setTimeout(resolve, Math.min(remaining, BACKOFF_SLICE_MS)));
+    if ((await options.checkpoint?.()) === "finish") return;
+  }
 }
 
 /** Parses X's compact follower labels (for example 1,234, 12.5K, 3M, or 1.2B). */
@@ -228,10 +255,13 @@ export async function enrichLeadsFromProfiles(
 ): Promise<RawLead[]> {
   const enriched: RawLead[] = [];
   let matched = 0;
-  let rateLimitStatus: number | null = null;
-  const stopWatching = watchForRateLimitResponses(page, (status) => {
-    rateLimitStatus = status;
-  });
+  // Counted per profile rather than latched on the first 429 anywhere: a single throttled
+  // background request is not the session being throttled, and treating it as one abandoned whole
+  // runs. Consecutive throttled profiles, after backing off between them, are.
+  const rateLimit = watchForRateLimitResponses(page);
+  const tolerance = options.rateLimitTolerance ?? DEFAULT_RATE_LIMIT_TOLERANCE;
+  const backoffMs = options.rateLimitBackoffMs ?? DEFAULT_RATE_LIMIT_BACKOFF_MS;
+  let throttledProfiles = 0;
 
   try {
     for (const [index, lead] of leads.entries()) {
@@ -248,9 +278,32 @@ export async function enrichLeadsFromProfiles(
       }
       if (verdict === "finish") break;
 
+      // Slow down rather than walk away: a throttled profile is retried after a back-off, and only
+      // a run of them ends enrichment as rate-limited.
+      if (rateLimit.take() > 0) {
+        throttledProfiles += 1;
+        if (throttledProfiles >= tolerance) {
+          const err = new RateLimitedError(`X returned HTTP 429 on ${throttledProfiles} consecutive profiles`);
+          attachPartialLeads(err, enriched);
+          throw err;
+        }
+        const wait = backoffMs * 2 ** (throttledProfiles - 1);
+        logger.warn(
+          { handle: lead.handle, throttledProfiles, waitMs: wait },
+          "X returned HTTP 429; backing off before the next profile"
+        );
+        try {
+          await backOff(wait, options);
+        } catch (err) {
+          attachPartialLeads(err, enriched);
+          throw err;
+        }
+      } else {
+        throttledProfiles = 0;
+      }
+
       for (let attempt = 1; attempt <= PROFILE_ATTEMPTS; attempt += 1) {
         try {
-          if (rateLimitStatus !== null) throw new RateLimitedError(`X returned HTTP ${rateLimitStatus}`);
           result = mergeProfileDetails(lead, await visitProfile(page, lead.handle));
           if (result.followers !== null) break;
 
@@ -295,7 +348,7 @@ export async function enrichLeadsFromProfiles(
       }
     }
   } finally {
-    stopWatching();
+    rateLimit.stop();
   }
 
   return enriched;

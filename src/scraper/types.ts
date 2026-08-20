@@ -39,6 +39,14 @@ export interface ScrapeSourceContext {
    * the worker owns where the signal comes from.
    */
   checkpoint?: () => Promise<"continue" | "finish">;
+  /**
+   * How many consecutive throttled rounds to tolerate — backing off between each — before ending
+   * the run as rate-limited, and how long the first of those back-offs is. Passed in rather than
+   * read from config here so the scraper modules stay free of env imports; the worker owns them
+   * (RATE_LIMIT_TOLERANCE / RATE_LIMIT_BACKOFF_MS).
+   */
+  rateLimitTolerance?: number;
+  rateLimitBackoffMs?: number;
   /** Called after each scroll round with the number of unique handles collected so far. */
   onProgress?: (collected: number) => void;
 }

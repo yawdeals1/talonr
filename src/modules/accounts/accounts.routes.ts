@@ -2,7 +2,17 @@ import { Router } from "express";
 import { asyncHandler } from "../../lib/async-handler.js";
 import { requireUuidParam } from "../../lib/validate-params.js";
 import { requireAuth } from "../auth/auth.middleware.js";
-import { connectToken, create, get, list, loginScript, remove, saveSession, update } from "./accounts.controller.js";
+import {
+  connectToken,
+  create,
+  get,
+  list,
+  loginScript,
+  remove,
+  revalidate,
+  saveSession,
+  update,
+} from "./accounts.controller.js";
 
 export const accountsRouter = Router();
 
@@ -23,5 +33,6 @@ accountsRouter.get("/", asyncHandler(list));
 accountsRouter.get("/:id", requireUuidParam("id"), asyncHandler(get));
 accountsRouter.get("/:id/connect-token", requireUuidParam("id"), asyncHandler(connectToken));
 accountsRouter.post("/", asyncHandler(create));
+accountsRouter.post("/:id/revalidate", requireUuidParam("id"), asyncHandler(revalidate));
 accountsRouter.patch("/:id", requireUuidParam("id"), asyncHandler(update));
 accountsRouter.delete("/:id", requireUuidParam("id"), asyncHandler(remove));

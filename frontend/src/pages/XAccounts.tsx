@@ -1,6 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useState, type FormEvent } from "react";
-import { createAccount, deleteAccount, getAccount, getConnectToken, listAccounts, updateAccount } from "../api/accounts";
+import {
+  createAccount,
+  deleteAccount,
+  getAccount,
+  getConnectToken,
+  listAccounts,
+  revalidateAccount,
+  updateAccount,
+} from "../api/accounts";
 import { absoluteApiUrl, ApiError } from "../api/client";
 import { listScrapes } from "../api/scrapes";
 import type { XAccount, XAccountStatus } from "../api/types";
@@ -19,10 +27,26 @@ function checkpointReasonFor(account: XAccount, jobs: { xAccountId: string; stat
   return relevant?.errorMessage ?? null;
 }
 
+/** A cooldown only means anything while it is still in the future. */
+function restingUntil(account: XAccount): string | null {
+  if (!account.cooldownUntil) return null;
+  return new Date(account.cooldownUntil).getTime() > Date.now() ? account.cooldownUntil : null;
+}
+
+function checkInFlight(account: XAccount): boolean {
+  return account.sessionCheck?.state === "queued" || account.sessionCheck?.state === "checking";
+}
+
 export function XAccounts() {
   const queryClient = useQueryClient();
 
-  const accountsQuery = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
+  const accountsQuery = useQuery({
+    queryKey: ["accounts"],
+    queryFn: listAccounts,
+    // A session re-check runs in the worker process, so its verdict lands out of band. Poll while
+    // one is outstanding so the card resolves itself instead of looking stuck until a refresh.
+    refetchInterval: (query) => ((query.state.data?.accounts ?? []).some(checkInFlight) ? 3000 : false),
+  });
   const scrapesQuery = useQuery({ queryKey: ["scrapes"], queryFn: () => listScrapes() });
 
   const [showConnect, setShowConnect] = useState(false);
@@ -48,6 +72,11 @@ export function XAccounts() {
       invalidate();
       setEditing(null);
     },
+  });
+
+  const revalidateMutation = useMutation({
+    mutationFn: revalidateAccount,
+    onSuccess: invalidate,
   });
 
   const deleteMutation = useMutation({
@@ -96,6 +125,10 @@ export function XAccounts() {
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {accounts.map((account) => {
             const reason = checkpointReasonFor(account, jobs);
+            const resting = restingUntil(account);
+            const check = account.sessionCheck;
+            const checking = checkInFlight(account);
+            const canRecheck = account.status === "checkpointed" && account.hasSession;
             return (
               <div key={account.id} className="flex flex-col gap-3 rounded-lg border p-4">
                 <div className="flex items-start justify-between">
@@ -107,6 +140,28 @@ export function XAccounts() {
                   <p className="text-xs text-status-warning">Not connected yet — session not captured.</p>
                 )}
 
+                {/* Resting is not a problem to fix: the account is connected and X is simply being
+                    given room. Said plainly here so it isn't mistaken for a checkpoint. */}
+                {resting && (
+                  <p className="rounded border border-status-warning-bg bg-status-warning-bg px-2 py-1 text-xs text-status-warning">
+                    Resting until {formatDateTime(resting)} — X asked for less traffic. Still connected;
+                    queued scrapes start again on their own.
+                  </p>
+                )}
+
+                {/* Offered ahead of Reconnect: it settles the same question in seconds, and only
+                    falls through to the login script when the saved session really is dead. */}
+                {canRecheck && (
+                  <button
+                    type="button"
+                    disabled={checking || revalidateMutation.isPending}
+                    onClick={() => revalidateMutation.mutate(account.id)}
+                    className="rounded-md border border-accent px-2 py-1.5 text-xs font-medium text-accent hover:bg-accent/10 disabled:opacity-60"
+                  >
+                    {checking ? "Checking session…" : "Re-check session"}
+                  </button>
+                )}
+
                 {(!account.hasSession || reason) && (
                   <button
                     type="button"
@@ -115,6 +170,16 @@ export function XAccounts() {
                   >
                     {reason ? "Reconnect" : "Finish connecting"}
                   </button>
+                )}
+
+                {check?.state === "unhealthy" && (
+                  <p className="rounded border border-status-danger-bg bg-status-danger-bg px-2 py-1 text-xs text-status-danger">
+                    {check.reason}
+                  </p>
+                )}
+
+                {revalidateMutation.error instanceof ApiError && revalidateMutation.variables === account.id && (
+                  <p className="text-xs text-status-danger">{revalidateMutation.error.message}</p>
                 )}
 
                 {reason && (
