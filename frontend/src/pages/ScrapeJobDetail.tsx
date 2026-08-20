@@ -15,6 +15,7 @@ import { Modal } from "../components/Modal";
 import { SkeletonRows } from "../components/Skeleton";
 import { StatusPill } from "../components/StatusPill";
 import { formatDateTime, formatNumber } from "../lib/format";
+import { isCancellableScrape, isCancelledScrape, scrapeDisplayStatus } from "../lib/scrape-status";
 
 const LEADS_PAGE_SIZE = 50;
 
@@ -26,6 +27,7 @@ export function ScrapeJobDetail() {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(() => new Set());
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [showCreateList, setShowCreateList] = useState(false);
   const [listName, setListName] = useState("");
@@ -162,7 +164,9 @@ export function ScrapeJobDetail() {
 
   const cancelMutation = useMutation({
     mutationFn: () => cancelScrape(id!),
-    onSuccess: () => {
+    onSuccess: ({ scrapeJob }) => {
+      setConfirmCancel(false);
+      queryClient.setQueryData(["scrapes", id], { scrapeJob });
       queryClient.invalidateQueries({ queryKey: ["scrapes"] });
     },
   });
@@ -203,10 +207,10 @@ export function ScrapeJobDetail() {
             {account ? `@${account.handle}` : "…"}
           </p>
         </div>
-        <StatusPill status={job.status} />
+        <StatusPill status={scrapeDisplayStatus(job)} />
       </div>
 
-      {(job.status === "failed" || job.status === "paused") && job.errorMessage && (
+      {(job.status === "failed" || job.status === "paused") && job.errorMessage && !isCancelledScrape(job) && (
         <div className="rounded-md border border-status-danger-bg bg-status-danger-bg p-3 text-sm text-status-danger">
           {job.errorMessage}
         </div>
@@ -238,25 +242,30 @@ export function ScrapeJobDetail() {
         </div>
       </dl>
 
-      {job.status === "queued" && (
+      {isCancellableScrape(job) && (
         <div>
           <button
             type="button"
-            onClick={() => cancelMutation.mutate()}
+            onClick={() => (job.status === "running" ? setConfirmCancel(true) : cancelMutation.mutate())}
             disabled={cancelMutation.isPending}
             className="rounded-md border border-status-danger-bg px-4 py-2 text-sm font-medium text-status-danger hover:bg-status-danger-bg disabled:opacity-50"
           >
-            {cancelMutation.isPending ? "Cancelling…" : "Cancel scrape"}
+            {cancelMutation.isPending ? "Stopping…" : job.status === "running" ? "Stop scrape" : "Cancel scrape"}
           </button>
+          <p className="mt-2 text-xs text-zinc-500">
+            {job.status === "running"
+              ? "The run stops at its next checkpoint — within about ten seconds — and keeps every lead it has already collected."
+              : "This scrape hasn't started yet, so it will be taken off the queue."}
+          </p>
           {cancelMutation.error instanceof ApiError && (
             <p className="mt-2 text-sm text-status-danger">{cancelMutation.error.message}</p>
           )}
         </div>
       )}
 
-      {job.status === "running" && (
+      {isCancelledScrape(job) && (
         <p className="text-xs text-zinc-500">
-          This job is already running and can't be hard-cancelled — it will finish or fail on its own.
+          Cancelled. Any leads collected before it stopped were saved and are listed below.
         </p>
       )}
 
@@ -500,6 +509,16 @@ export function ScrapeJobDetail() {
           confirmLabel={bulkDeleteMutation.isPending ? "Deleting…" : "Delete selected"}
           onConfirm={() => bulkDeleteMutation.mutate()}
           onCancel={() => setConfirmBulkDelete(false)}
+        />
+      )}
+
+      {confirmCancel && (
+        <ConfirmDialog
+          title="Stop this scrape?"
+          message="The run stops at its next checkpoint, within about ten seconds, and keeps every lead it has already collected. It won't resume — trigger a new scrape to pick up where this one left off."
+          confirmLabel={cancelMutation.isPending ? "Stopping…" : "Stop scrape"}
+          onConfirm={() => cancelMutation.mutate()}
+          onCancel={() => setConfirmCancel(false)}
         />
       )}
 

@@ -2,13 +2,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { listAccounts } from "../api/accounts";
-import { bulkDeleteScrapes, deleteScrape, listScrapes } from "../api/scrapes";
+import { bulkDeleteScrapes, cancelScrape, deleteScrape, listScrapes } from "../api/scrapes";
 import type { ScrapeJob, ScrapeJobStatus } from "../api/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
 import { SkeletonRows } from "../components/Skeleton";
 import { StatusPill } from "../components/StatusPill";
 import { formatNumber, formatRelative } from "../lib/format";
+import { isCancellableScrape, scrapeDisplayStatus } from "../lib/scrape-status";
 
 const STATUS_OPTIONS: ScrapeJobStatus[] = ["queued", "running", "completed", "failed", "paused"];
 
@@ -18,6 +19,7 @@ export function ScrapeJobs() {
   const [status, setStatus] = useState<ScrapeJobStatus | "">("");
   const [xAccountId, setXAccountId] = useState("");
   const [deleting, setDeleting] = useState<ScrapeJob | null>(null);
+  const [cancelling, setCancelling] = useState<ScrapeJob | null>(null);
   const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(() => new Set());
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
 
@@ -41,6 +43,14 @@ export function ScrapeJobs() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["scrapes"] });
       setDeleting(null);
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: cancelScrape,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["scrapes"] });
+      setCancelling(null);
     },
   });
 
@@ -208,7 +218,7 @@ export function ScrapeJobs() {
                     {accountById.get(job.xAccountId)?.handle ? `@${accountById.get(job.xAccountId)!.handle}` : "—"}
                   </td>
                   <td className="px-3 py-2">
-                    <StatusPill status={job.status} />
+                    <StatusPill status={scrapeDisplayStatus(job)} />
                   </td>
                   <td className="px-3 py-2 font-mono">{formatNumber(job.leadsFound)}</td>
                   <td className="px-3 py-2 text-xs text-zinc-500">
@@ -218,6 +228,16 @@ export function ScrapeJobs() {
                     {job.finishedAt ? formatRelative(job.finishedAt) : "—"}
                   </td>
                   <td className="px-3 py-2 text-right" onClick={(event) => event.stopPropagation()}>
+                    {isCancellableScrape(job) && (
+                      <button
+                        type="button"
+                        onClick={() => setCancelling(job)}
+                        title={job.status === "running" ? "Stop this run" : "Take this scrape off the queue"}
+                        className="mr-2 rounded-md border px-2.5 py-1 text-xs font-medium text-status-danger hover:bg-status-danger-bg"
+                      >
+                        {job.status === "running" ? "Stop" : "Cancel"}
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => setDeleting(job)}
@@ -233,6 +253,22 @@ export function ScrapeJobs() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {cancelling && (
+        <ConfirmDialog
+          title={cancelling.status === "running" ? "Stop this scrape?" : "Cancel this scrape?"}
+          message={
+            cancelling.status === "running"
+              ? "The run stops at its next checkpoint, within about ten seconds, and keeps every lead it has already collected."
+              : "This scrape hasn't started yet, so it will be taken off the queue."
+          }
+          confirmLabel={
+            cancelMutation.isPending ? "Stopping…" : cancelling.status === "running" ? "Stop scrape" : "Cancel scrape"
+          }
+          onConfirm={() => cancelMutation.mutate(cancelling.id)}
+          onCancel={() => setCancelling(null)}
+        />
       )}
 
       {deleting && (

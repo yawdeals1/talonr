@@ -63,7 +63,8 @@ src/
 ├── modules/
 │   ├── auth/          routes, controller, service, middleware, deploro-auth.client.ts
 │   ├── accounts/       routes, controller, service       — X account CRUD, own-scoped
-│   ├── scrapes/        routes, controller, service       — trigger/list/detail/cancel scrape jobs
+│   ├── scrapes/        routes, controller, service, scrape-cancel.ts, scrape-results.service.ts
+│   │                                                      — trigger/list/detail/cancel scrape jobs
 │   ├── leads/           routes, controller, service       — read scraped leads + upsertLeads()
 │   ├── lead-lists/     routes, controller, service, filter-query-builder.ts
 │   ├── admin/           routes, controller, service       — cross-user read-only routes
@@ -283,6 +284,31 @@ no retry — per the safety requirement. A `checkpointed`/`banned` account can't
 back to `active` through `PATCH /accounts/:id` (`accounts.service.ts#updateAccount`) — that would
 let a user silently bypass the safety trip; resuming requires re-running the login script.
 
+### Cancelling a run (`modules/scrapes/scrape-cancel.ts`)
+
+`POST /scrapes/:id/cancel` works on a **queued or running** job. A queued one is pulled out of the
+BullMQ queue; a running one can't be killed from the API process (the Playwright run is in the
+worker), so the API marks the job row and the worker stops itself.
+
+- **The signal is the job row, not an in-memory flag or a Redis key.** The API and worker are
+  separate processes, and a cancel has to survive a worker restart — BullMQ hands a stalled job to
+  the next worker, which would otherwise happily re-run a scrape the user had already stopped. The
+  processor therefore re-reads the row before it does anything (a cancelled or deleted row means
+  return immediately, before a quota slot or a browser is spent), and `createCancellationCheck`
+  re-reads it at most once every 8s during the run.
+- **Checkpoints**: `scroll-collector.ts` before each scroll round, `profile-enricher.ts` before each
+  profile visit — both via the injected `shouldCancel` callback, so the scraper modules stay free
+  of database imports. It throws `ScrapeCancelledError`, which unwinds through the same
+  partial-lead path a throttled run uses: a cancelled scrape keeps every lead it had collected.
+- `ScrapeCancelledError` is deliberately neither an account-health error (X did nothing wrong — the
+  account must not be checkpointed) nor a plain `Error` (BullMQ must not retry it).
+- **A cancelled job is stored as `status: "failed"` with `errorMessage` exactly
+  `"Cancelled by user"`**, because `scrape_jobs.status` is a Postgres enum owned by a role this
+  app's Studio DB connection isn't a member of: `ALTER TYPE scrape_job_status ADD VALUE 'cancelled'`
+  fails with "must be owner of type scrape_job_status", so the enum can't be extended from here.
+  `isCancelledJob` is the only place that knows the encoding server-side, mirrored by
+  `frontend/src/lib/scrape-status.ts` for the pill and the buttons — keep the two constants in step.
+
 ## Scraper modules (`src/scraper/`)
 
 Shared `ScrapeSource` interface (`buildUrl`, `waitForReady`, `extractVisibleItems`) implemented by
@@ -387,7 +413,7 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 | POST | /scrapes | auth | Create a scrape_jobs row + enqueue BullMQ job (`xAccountId`, `sourceType`: `search`\|`followers`\|`engagers`, `sourceRef`, `engagementTypes?` required for `engagers`, `capLeads?`, `resultFilterDefinition?` — a follower/location filter that both steers the run toward `capLeads` matching leads and becomes the job's saved results view) — rate-limited per user |
 | GET | /scrapes | auth | List own jobs, filterable by `status`/`xAccountId` |
 | GET | /scrapes/:id | auth | Job detail/status |
-| POST | /scrapes/:id/cancel | auth | Removes from queue if still waiting/delayed; best-effort if already running |
+| POST | /scrapes/:id/cancel | auth | Cancels a queued **or running** scrape — removes a not-yet-started job from the queue, and marks a running one cancelled so the worker stops at its next checkpoint and saves what it collected |
 | DELETE | /scrapes/:id | auth | Deletes a non-running scrape record/queue entry; collected leads remain saved |
 | GET | /leads | auth | Paginated own leads, filterable by `handle`/`sourceType`/`sourceRef`/`minFollowers`/`maxFollowers`/`location`; returns the full matched `total` alongside the page |
 | GET | /leads/:id | auth | Lead detail |
@@ -483,8 +509,10 @@ wrapper around the same file.
 
 - No admin impersonation/session-switching — admin routes are strictly read-only cross-user views.
 - No refresh-token rotation — Deploro session tokens expire after 7 days, re-login after that.
-- `POST /scrapes/:id/cancel` can't hard-kill an in-flight Playwright run; it only removes
-  not-yet-started (waiting/delayed) jobs from the queue.
+- `POST /scrapes/:id/cancel` still can't kill an in-flight Playwright call mid-flight — the API
+  and the worker are separate processes — but a cancel is no longer best-effort: it marks the job
+  row and the run stops at its next checkpoint (a scroll round or a profile visit, so within
+  roughly ten seconds), keeping the leads it had. See "Cancelling a run" below.
 - Studio DB constraints (see "Data model" above) mean lead-list filtering and the leads
   handle-search run in-process over a capped fetch rather than in SQL, and `upsertLeads` is N
   bounded-concurrency REST calls instead of one bulk statement — both fine at this project's scale,

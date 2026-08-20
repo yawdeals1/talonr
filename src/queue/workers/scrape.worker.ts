@@ -6,6 +6,7 @@ import { logger } from "../../lib/logger.js";
 import { logActivity } from "../../modules/activity/activity.service.js";
 import { buildFilterPredicate } from "../../modules/lead-lists/filter-query-builder.js";
 import { upsertLeads } from "../../modules/leads/leads.service.js";
+import { CANCELLED_ERROR_MESSAGE, createCancellationCheck, isCancelledJob } from "../../modules/scrapes/scrape-cancel.js";
 import { saveScrapeJobLeadIds } from "../../modules/scrapes/scrape-results.service.js";
 import { closeScrapeSession, launchScrapeSession } from "../../scraper/browser.js";
 import { enrichLeadsFromProfiles } from "../../scraper/profile-enricher.js";
@@ -20,6 +21,7 @@ import {
   getPartialLeads,
   getPartialLeadsSaved,
   isAccountHealthError,
+  isScrapeCancelledError,
   setPartialLeadsSaved,
   type RawLead,
   type ScrapeSource,
@@ -137,12 +139,14 @@ async function runScrape(data: ScrapeJobData): Promise<{ leadsFound: number }> {
   try {
     const page = await session.context.newPage();
     const candidateCap = candidateCapFor(data);
+    const shouldCancel = createCancellationCheck(data.scrapeJobId);
     const collectOpts = {
       page,
       sourceRef: data.sourceRef,
       capLeads: candidateCap,
       minScrollDelayMs: env.SCROLL_DELAY_MIN_MS,
       maxScrollDelayMs: env.SCROLL_DELAY_MAX_MS,
+      shouldCancel,
     };
 
     let rawLeads: RawLead[];
@@ -170,6 +174,7 @@ async function runScrape(data: ScrapeJobData): Promise<{ leadsFound: number }> {
       enrichedLeads = await enrichLeadsFromProfiles(page, rawLeads, {
         minDelayMs: env.PROFILE_DELAY_MIN_MS,
         maxDelayMs: env.PROFILE_DELAY_MAX_MS,
+        shouldCancel,
         // With a filter on the job, aim for capLeads *matching* leads out of the larger candidate
         // pool collected above; the enricher stops as soon as it has them.
         ...(hasResultFilter(data.resultFilter)
@@ -197,6 +202,15 @@ export function startScrapeWorker(): Worker<ScrapeJobData> {
     SCRAPE_QUEUE_NAME,
     async (job, token) => {
       const { scrapeJobId, xAccountId } = job.data;
+
+      // Checked before anything else costs a quota slot or a browser: a cancel that landed while
+      // the job was queued should never start, and neither should one that landed mid-run and then
+      // came back here because a worker restart handed BullMQ a stalled job to retry.
+      const jobRow = await studioGet<ScrapeJob>("scrape_jobs", scrapeJobId);
+      if (!jobRow || isCancelledJob(jobRow)) {
+        logger.info({ scrapeJobId }, "skipping scrape: the job was cancelled or no longer exists");
+        return;
+      }
 
       const account = await studioGet<XAccount>("x_accounts", xAccountId);
       if (!account) {
@@ -233,6 +247,24 @@ export function startScrapeWorker(): Worker<ScrapeJobData> {
           leadsFound,
         });
       } catch (err) {
+        if (isScrapeCancelledError(err)) {
+          // The row is already `failed`/"Cancelled by user" — the API wrote that when the user
+          // asked, which is what this run just noticed. Only the outcome of the work needs
+          // recording: whatever it had collected has been saved by now.
+          const leadsFound = getPartialLeadsSaved(err);
+          await markJobStatus(scrapeJobId, "failed", CANCELLED_ERROR_MESSAGE, {
+            finishedAt: new Date(),
+            leadsFound,
+          });
+          await logActivity(job.data.userId, "scrape.cancelled", {
+            scrapeJobId,
+            xAccountId,
+            sourceType: job.data.sourceType,
+            leadsFound,
+          });
+          return; // terminal — a cancelled scrape must never be retried
+        }
+
         if (isAccountHealthError(err)) {
           const leadsFound = getPartialLeadsSaved(err);
           await setAccountStatus(xAccountId, "checkpointed");

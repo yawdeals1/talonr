@@ -79,11 +79,16 @@ export async function scrollAndCollect(source: ScrapeSource, ctx: ScrapeSourceCo
   });
 
   try {
+    await ctx.shouldCancel?.();
     await openListPage(source, ctx);
 
     let stagnantRounds = 0;
 
     while (seen.size < ctx.capLeads && stagnantRounds < MAX_STAGNANT_ROUNDS) {
+      // Cancellation is checked before the round's work, not after, so a stopped run does at most
+      // one more scroll. It throws, and the catch below carries the collected leads out as
+      // partials — a cancel keeps what the run had already found.
+      await ctx.shouldCancel?.();
       if (rateLimitStatus !== null) throw new RateLimitedError(`X returned HTTP ${rateLimitStatus}`);
 
       try {

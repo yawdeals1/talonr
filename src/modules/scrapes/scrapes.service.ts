@@ -5,7 +5,9 @@ import type { EngagementType, Lead, ScrapeJob, ScrapeResultFilter, XAccount } fr
 import { mapWithConcurrency } from "../../lib/concurrency.js";
 import { NotFoundError, ValidationError } from "../../lib/errors.js";
 import { scrapeQueue } from "../../queue/queues.js";
+import { logActivity } from "../activity/activity.service.js";
 import { buildFilterPredicate } from "../lead-lists/filter-query-builder.js";
+import { CANCELLED_ERROR_MESSAGE, isCancelledJob } from "./scrape-cancel.js";
 import {
   attachScrapeResultSettings,
   createScrapeResultStore,
@@ -135,28 +137,40 @@ export async function listScrapeJobLeads(userId: string, id: string, page = 1, p
   };
 }
 
+/**
+ * Cancels a scrape, whether it has started or not.
+ *
+ * A queued job is pulled straight out of the BullMQ queue. A *running* job can't be killed from
+ * this process — the Playwright run lives in the worker — so the job row is marked cancelled here
+ * and the worker stops itself at its next checkpoint (see scrape-cancel.ts#createCancellationCheck),
+ * saving whatever it had already collected. Writing the row first rather than signalling the worker
+ * and waiting means the cancel sticks even if that worker is wedged or gets restarted: the run can
+ * never come back, because the processor re-reads this row before it does anything.
+ */
 export async function cancelScrapeJob(userId: string, id: string) {
   const job = await getScrapeJob(userId, id);
+
+  if (job.status !== "queued" && job.status !== "running") {
+    throw new ValidationError(`This scrape is already ${job.status} and cannot be cancelled`);
+  }
 
   const bullJob = await scrapeQueue.getJob(id);
   if (bullJob) {
     const state = await bullJob.getState();
+    // An active job's lock belongs to the worker holding it; removing it here would throw. The
+    // status write below is what stops that one, and the worker takes it off the queue itself.
     if (state === "waiting" || state === "delayed") {
       await bullJob.remove();
     }
   }
 
-  if (job.status === "queued") {
-    const updated = await studioUpdate<ScrapeJob>("scrape_jobs", id, {
-      status: "failed",
-      errorMessage: "Cancelled by user",
-      finishedAt: new Date(),
-    });
-    return attachScrapeResultSettings(normalizeStudioSourceType(updated), await getScrapeResultStore(userId, id));
-  }
-
-  // Already running/terminal: best-effort only, can't hard-kill an in-flight Playwright run.
-  return job;
+  const updated = await studioUpdate<ScrapeJob>("scrape_jobs", id, {
+    status: "failed",
+    errorMessage: CANCELLED_ERROR_MESSAGE,
+    finishedAt: new Date(),
+  });
+  await logActivity(userId, "scrape.cancelled", { scrapeJobId: id, wasRunning: job.status === "running" });
+  return attachScrapeResultSettings(normalizeStudioSourceType(updated), await getScrapeResultStore(userId, id));
 }
 
 export async function deleteScrapeJob(userId: string, id: string): Promise<void> {
@@ -169,7 +183,13 @@ export async function deleteScrapeJob(userId: string, id: string): Promise<void>
   if (bullJob) {
     const state = await bullJob.getState();
     if (state === "active") {
-      throw new ValidationError("A running scrape cannot be deleted");
+      // A just-cancelled job stays active until the worker reaches its next checkpoint, so this
+      // is a wait-a-moment, not a refusal — say which one it is.
+      throw new ValidationError(
+        isCancelledJob(job)
+          ? "This scrape is still stopping — try again in a few seconds"
+          : "A running scrape cannot be deleted"
+      );
     }
     await bullJob.remove();
   }

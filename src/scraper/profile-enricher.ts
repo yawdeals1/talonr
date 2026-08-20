@@ -1,7 +1,13 @@
 import type { Page } from "playwright";
 import { logger } from "../lib/logger.js";
 import { checkHealth, watchForRateLimitResponses } from "./detectors.js";
-import { attachPartialLeads, isAccountHealthError, RateLimitedError, type RawLead } from "./types.js";
+import {
+  attachPartialLeads,
+  isAccountHealthError,
+  isScrapeCancelledError,
+  RateLimitedError,
+  type RawLead,
+} from "./types.js";
 
 interface ProfileDetails {
   displayName: string | null;
@@ -32,6 +38,12 @@ export interface ProfileEnrichmentOptions {
     matches: (lead: RawLead) => boolean;
     count: number;
   };
+  /**
+   * Checkpoint called before each profile visit; throws `ScrapeCancelledError` once the user has
+   * cancelled the run. Enrichment is the long tail of a scrape (one page load per lead), so this
+   * is where a cancel usually lands.
+   */
+  shouldCancel?: () => Promise<void>;
 }
 
 // One extra visit for a profile whose header never rendered. X's profile header hydrates after
@@ -219,6 +231,7 @@ export async function enrichLeadsFromProfiles(
 
       for (let attempt = 1; attempt <= PROFILE_ATTEMPTS; attempt += 1) {
         try {
+          await options.shouldCancel?.();
           if (rateLimitStatus !== null) throw new RateLimitedError(`X returned HTTP ${rateLimitStatus}`);
           result = mergeProfileDetails(lead, await visitProfile(page, lead.handle));
           if (result.followers !== null) break;
@@ -231,7 +244,9 @@ export async function enrichLeadsFromProfiles(
             await randomDelay(options.minDelayMs, options.maxDelayMs);
           }
         } catch (err) {
-          if (isAccountHealthError(err)) {
+          // Both of these end the whole run rather than this one profile, and both carry the
+          // already-enriched leads out so the worker can still save them.
+          if (isAccountHealthError(err) || isScrapeCancelledError(err)) {
             attachPartialLeads(err, enriched);
             throw err;
           }

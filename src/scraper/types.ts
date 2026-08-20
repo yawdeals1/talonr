@@ -32,6 +32,12 @@ export interface ScrapeSourceContext {
    * second run still carries the first run's leads out as partials.
    */
   into?: Map<string, RawLead>;
+  /**
+   * Checkpoint the collector calls once per scroll round; it throws `ScrapeCancelledError` when
+   * the user has cancelled the run. Injected as a callback so the scraper modules stay free of
+   * database imports — the worker owns where the signal comes from.
+   */
+  shouldCancel?: () => Promise<void>;
 }
 
 export interface ScrapeSource {
@@ -76,6 +82,23 @@ export class TransientPageError extends Error {
     super(`Transient page error: ${detail}`);
     this.name = "TransientPageError";
   }
+}
+
+/**
+ * The user asked for this run to stop. Deliberately *not* an account-health error: X did nothing
+ * wrong, so the account must not be checkpointed — and deliberately not a plain Error either, so
+ * the worker can mark the job cancelled and skip BullMQ's attempts/backoff instead of retrying a
+ * scrape someone just stopped.
+ */
+export class ScrapeCancelledError extends Error {
+  constructor() {
+    super("Scrape cancelled by user");
+    this.name = "ScrapeCancelledError";
+  }
+}
+
+export function isScrapeCancelledError(err: unknown): err is ScrapeCancelledError {
+  return err instanceof ScrapeCancelledError;
 }
 
 export function isAccountHealthError(

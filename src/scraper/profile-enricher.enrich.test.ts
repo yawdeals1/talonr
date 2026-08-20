@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Page } from "playwright";
-import type { RawLead } from "./types.js";
+import { getPartialLeads, ScrapeCancelledError, type RawLead } from "./types.js";
 
 const detectors = vi.hoisted(() => ({
   checkHealth: vi.fn(async () => undefined),
@@ -126,6 +126,30 @@ describe("enrichLeadsFromProfiles", () => {
     expect(visits).toEqual(["tiny1", "good1", "tiny2", "good2"]);
     expect(enriched.map((lead) => lead.handle)).toEqual(["tiny1", "good1", "tiny2", "good2"]);
     expect(enriched.filter((lead) => lead.followers! >= 100 && lead.followers! <= 2000)).toHaveLength(2);
+  });
+
+  it("stops on cancellation and carries the already-enriched leads out on the error", async () => {
+    // A cancelled run must keep its work: the worker saves these partials before marking the job
+    // cancelled, so stopping a long scrape doesn't throw away what it had already collected.
+    const { page, visits } = fakePage({
+      a: [{ followersCandidates: ["10 Followers"] }],
+      b: [{ followersCandidates: ["20 Followers"] }],
+      c: [{ followersCandidates: ["30 Followers"] }],
+    });
+    let visitsBeforeCancel = 2;
+
+    const promise = enrichLeadsFromProfiles(page, ["a", "b", "c"].map(rawLead), {
+      ...noDelay,
+      shouldCancel: async () => {
+        if (visitsBeforeCancel-- <= 0) throw new ScrapeCancelledError();
+      },
+    });
+
+    await expect(promise).rejects.toBeInstanceOf(ScrapeCancelledError);
+    expect(visits).toEqual(["a", "b"]);
+    await promise.catch((err: unknown) => {
+      expect(getPartialLeads(err).map((lead) => lead.handle)).toEqual(["a", "b"]);
+    });
   });
 
   it("visits every lead when the job carries no filter", async () => {

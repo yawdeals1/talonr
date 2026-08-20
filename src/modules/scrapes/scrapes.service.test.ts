@@ -10,6 +10,7 @@ import {
   listScrapeJobLeads,
   updateScrapeResultFilter,
 } from "./scrapes.service.js";
+import { CANCELLED_ERROR_MESSAGE, isCancelledJob } from "./scrape-cancel.js";
 
 // Compensating control for the lack of database-level tenant isolation (see
 // accounts.service.test.ts for the full rationale) — this file covers scrapes.service.ts's own
@@ -209,6 +210,47 @@ describe("scrapes.service ownership isolation", () => {
     studioGet.mockResolvedValue(ownedJob);
     await expect(cancelScrapeJob(ATTACKER, JOB_ID)).rejects.toBeInstanceOf(NotFoundError);
     expect(queueGetJob).not.toHaveBeenCalled();
+    expect(studioUpdate).not.toHaveBeenCalled();
+  });
+
+  it("cancelScrapeJob: stops a running job by marking the row, without touching its queue entry", async () => {
+    // The Playwright run lives in the worker process, so the API can't kill it directly: it writes
+    // the cancelled row and the worker stops itself at its next checkpoint. Removing the BullMQ
+    // entry here would throw — an active job's lock belongs to the worker holding it.
+    const getState = vi.fn().mockResolvedValue("active");
+    const remove = vi.fn().mockResolvedValue(undefined);
+    studioGet.mockResolvedValue({ ...ownedJob, status: "running" });
+    queueGetJob.mockResolvedValue({ getState, remove });
+    studioUpdate.mockResolvedValue({ ...ownedJob, status: "failed", errorMessage: CANCELLED_ERROR_MESSAGE });
+    studioInsert.mockResolvedValue({});
+
+    const result = await cancelScrapeJob(OWNER, JOB_ID);
+
+    expect(remove).not.toHaveBeenCalled();
+    expect(studioUpdate).toHaveBeenCalledWith(
+      "scrape_jobs",
+      JOB_ID,
+      expect.objectContaining({ status: "failed", errorMessage: CANCELLED_ERROR_MESSAGE })
+    );
+    expect(isCancelledJob(result)).toBe(true);
+  });
+
+  it("cancelScrapeJob: takes a not-yet-started job off the queue as well", async () => {
+    const getState = vi.fn().mockResolvedValue("waiting");
+    const remove = vi.fn().mockResolvedValue(undefined);
+    studioGet.mockResolvedValue(ownedJob);
+    queueGetJob.mockResolvedValue({ getState, remove });
+    studioUpdate.mockResolvedValue({ ...ownedJob, status: "failed", errorMessage: CANCELLED_ERROR_MESSAGE });
+    studioInsert.mockResolvedValue({});
+
+    await cancelScrapeJob(OWNER, JOB_ID);
+
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancelScrapeJob: refuses a job that has already finished", async () => {
+    studioGet.mockResolvedValue({ ...ownedJob, status: "completed" });
+    await expect(cancelScrapeJob(OWNER, JOB_ID)).rejects.toBeInstanceOf(ValidationError);
     expect(studioUpdate).not.toHaveBeenCalled();
   });
 
