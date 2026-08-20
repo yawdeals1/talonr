@@ -3,15 +3,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const studio = vi.hoisted(() => ({ studioGet: vi.fn() }));
 vi.mock("../../db/studio-client.js", () => studio);
 
-const { CANCELLED_ERROR_MESSAGE, createCancellationCheck, isCancelledJob } = await import("./scrape-cancel.js");
+const results = vi.hoisted(() => ({ isScrapeFinishRequested: vi.fn() }));
+vi.mock("./scrape-results.service.js", () => results);
+
+const { CANCELLED_ERROR_MESSAGE, createRunCheckpoint, isCancelledJob } = await import("./scrape-cancel.js");
 const { ScrapeCancelledError } = await import("../../scraper/types.js");
 
 const runningJob = { status: "running", errorMessage: null } as const;
 const cancelledJob = { status: "failed", errorMessage: CANCELLED_ERROR_MESSAGE } as const;
 
+const checkpointFor = () => createRunCheckpoint("user-1", "job-1");
+
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.useRealTimers();
+  results.isScrapeFinishRequested.mockResolvedValue(false);
 });
 
 describe("isCancelledJob", () => {
@@ -23,38 +28,55 @@ describe("isCancelledJob", () => {
   });
 });
 
-describe("createCancellationCheck", () => {
-  it("passes while the job is still wanted", async () => {
+describe("createRunCheckpoint", () => {
+  it("lets a wanted run carry on", async () => {
     studio.studioGet.mockResolvedValue(runningJob);
-    await expect(createCancellationCheck("job-1")()).resolves.toBeUndefined();
+    await expect(checkpointFor()()).resolves.toBe("continue");
   });
 
   it("throws once the job row is marked cancelled", async () => {
     studio.studioGet.mockResolvedValue(cancelledJob);
-    await expect(createCancellationCheck("job-1")()).rejects.toBeInstanceOf(ScrapeCancelledError);
+    await expect(checkpointFor()()).rejects.toBeInstanceOf(ScrapeCancelledError);
   });
 
   it("treats a deleted job row as a cancellation", async () => {
     studio.studioGet.mockResolvedValue(null);
-    await expect(createCancellationCheck("job-1")()).rejects.toBeInstanceOf(ScrapeCancelledError);
+    await expect(checkpointFor()()).rejects.toBeInstanceOf(ScrapeCancelledError);
   });
 
   it("keeps throwing without re-reading once it has seen the cancellation", async () => {
     studio.studioGet.mockResolvedValue(cancelledJob);
-    const shouldCancel = createCancellationCheck("job-1");
+    const checkpoint = checkpointFor();
 
-    await expect(shouldCancel()).rejects.toBeInstanceOf(ScrapeCancelledError);
-    await expect(shouldCancel()).rejects.toBeInstanceOf(ScrapeCancelledError);
+    await expect(checkpoint()).rejects.toBeInstanceOf(ScrapeCancelledError);
+    await expect(checkpoint()).rejects.toBeInstanceOf(ScrapeCancelledError);
     expect(studio.studioGet).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a finish request, and keeps reporting it without re-reading", async () => {
+    studio.studioGet.mockResolvedValue(runningJob);
+    results.isScrapeFinishRequested.mockResolvedValue(true);
+    const checkpoint = checkpointFor();
+
+    await expect(checkpoint()).resolves.toBe("finish");
+    await expect(checkpoint()).resolves.toBe("finish");
+    expect(studio.studioGet).toHaveBeenCalledTimes(1);
+  });
+
+  it("prefers a cancellation over a finish request", async () => {
+    // Both can be true at once — the user asks to wrap up, then decides to stop outright.
+    studio.studioGet.mockResolvedValue(cancelledJob);
+    results.isScrapeFinishRequested.mockResolvedValue(true);
+    await expect(checkpointFor()()).rejects.toBeInstanceOf(ScrapeCancelledError);
   });
 
   it("throttles reads so a long run doesn't poll on every scroll round", async () => {
     studio.studioGet.mockResolvedValue(runningJob);
-    const shouldCancel = createCancellationCheck("job-1");
+    const checkpoint = checkpointFor();
 
-    await shouldCancel();
-    await shouldCancel();
-    await shouldCancel();
+    await checkpoint();
+    await checkpoint();
+    await checkpoint();
 
     expect(studio.studioGet).toHaveBeenCalledTimes(1);
   });
@@ -62,6 +84,6 @@ describe("createCancellationCheck", () => {
   it("lets the run continue when the check itself fails", async () => {
     // A Studio hiccup must not kill a healthy scrape — the next checkpoint tries again.
     studio.studioGet.mockRejectedValue(new Error("studio unavailable"));
-    await expect(createCancellationCheck("job-1")()).resolves.toBeUndefined();
+    await expect(checkpointFor()()).resolves.toBe("continue");
   });
 });

@@ -13,6 +13,7 @@ import {
   createScrapeResultStore,
   deleteScrapeResultStore,
   getScrapeResultStore,
+  requestScrapeFinishRow,
   scrapeResultLeadIds,
   updateScrapeResultStoreFilter,
 } from "./scrape-results.service.js";
@@ -171,6 +172,29 @@ export async function cancelScrapeJob(userId: string, id: string) {
   });
   await logActivity(userId, "scrape.cancelled", { scrapeJobId: id, wasRunning: job.status === "running" });
   return attachScrapeResultSettings(normalizeStudioSourceType(updated), await getScrapeResultStore(userId, id));
+}
+
+/**
+ * "That's enough — wrap up with what you have."
+ *
+ * Distinct from a cancel: the run stops looking for more at its next checkpoint, but everything it
+ * found is kept and the job completes normally rather than ending as cancelled. Only meaningful
+ * while a job is actually running; a queued one hasn't collected anything, so there is nothing to
+ * wrap up and cancelling is the honest action.
+ */
+export async function finishScrapeJobEarly(userId: string, id: string) {
+  const job = await getScrapeJob(userId, id);
+  if (job.status !== "running") {
+    throw new ValidationError(
+      job.status === "queued"
+        ? "This scrape hasn't started yet — cancel it instead"
+        : `This scrape is already ${job.status}`
+    );
+  }
+
+  await requestScrapeFinishRow(userId, id);
+  await logActivity(userId, "scrape.finish_requested", { scrapeJobId: id });
+  return getScrapeJob(userId, id);
 }
 
 export async function deleteScrapeJob(userId: string, id: string): Promise<void> {

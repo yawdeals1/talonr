@@ -4,6 +4,9 @@
 // Timestamp columns come back as ISO strings (studio-client.ts round-trips JSON, not a Postgres
 // driver's native Date parsing) — every table has createdAt for that reason.
 
+import type { ScrapeProgress } from "../modules/scrapes/scrape-results.service.js";
+export type { ScrapeProgress };
+
 export type UserRole = "user" | "admin";
 export type XAccountStatus = "active" | "checkpointed" | "banned";
 // "likers" is legacy-only (X made "who liked a post" private platform-wide in June 2024, with
@@ -54,6 +57,9 @@ export interface ScrapeJob {
   // False for jobs created before exact per-job lead membership was introduced. New jobs keep
   // exact lead ids and this filter in a hidden internal lead_lists JSONB record.
   tracksExactLeads: boolean;
+  // Live counters a running job publishes so the UI can show what it's doing; null before the run
+  // reports anything and for jobs that predate progress reporting.
+  progress: ScrapeProgress | null;
   status: ScrapeJobStatus;
   leadsFound: number;
   errorMessage: string | null;

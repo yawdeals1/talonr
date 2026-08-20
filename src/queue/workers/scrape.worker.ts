@@ -6,8 +6,12 @@ import { logger } from "../../lib/logger.js";
 import { logActivity } from "../../modules/activity/activity.service.js";
 import { buildFilterPredicate } from "../../modules/lead-lists/filter-query-builder.js";
 import { upsertLeads } from "../../modules/leads/leads.service.js";
-import { CANCELLED_ERROR_MESSAGE, createCancellationCheck, isCancelledJob } from "../../modules/scrapes/scrape-cancel.js";
-import { saveScrapeJobLeadIds } from "../../modules/scrapes/scrape-results.service.js";
+import { CANCELLED_ERROR_MESSAGE, createRunCheckpoint, isCancelledJob } from "../../modules/scrapes/scrape-cancel.js";
+import {
+  clearScrapeFinishRequest,
+  saveScrapeJobLeadIds,
+  saveScrapeProgress,
+} from "../../modules/scrapes/scrape-results.service.js";
 import { closeScrapeSession, launchScrapeSession } from "../../scraper/browser.js";
 import { enrichLeadsFromProfiles } from "../../scraper/profile-enricher.js";
 import { decryptProxy, decryptSession } from "../../scraper/session-store.js";
@@ -17,7 +21,6 @@ import { repliersSource } from "../../scraper/sources/repliers.source.js";
 import { retweetersSource } from "../../scraper/sources/retweeters.source.js";
 import { searchSource } from "../../scraper/sources/search.source.js";
 import {
-  attachPartialLeads,
   getPartialLeads,
   getPartialLeadsSaved,
   isAccountHealthError,
@@ -78,26 +81,32 @@ async function persistLeads(data: ScrapeJobData, leads: RawLead[]): Promise<numb
 }
 
 /**
- * Saves whatever a cut-short run managed to collect, recording the count on the error so the
- * caller can report it on the paused job.
+ * Saves whatever a run cut short during *collection* managed to gather, recording the count on the
+ * error so the caller can report it on the stopped job.
  *
  * Enrichment is deliberately skipped: the run was stopped because X pushed back, and visiting one
  * profile per lead is the last thing to do in that state. `upsertLeads` merges rather than
  * overwrites, so the missing profile fields stay whatever a previous scrape put on file and get
- * filled in on the next successful run.
+ * filled in on the next successful run. On a filtered job these leads have no follower count yet,
+ * so the sink keeps none of them — an unverified lead can't be claimed to match the range the user
+ * asked for.
  */
-async function savePartialLeads(data: ScrapeJobData, err: unknown): Promise<void> {
+async function savePartialLeads(data: ScrapeJobData, sink: LeadSink, err: unknown): Promise<void> {
   const partial = getPartialLeads(err);
-  if (partial.length === 0) return;
+  if (partial.length === 0) {
+    setPartialLeadsSaved(err, sink.saved);
+    return;
+  }
 
   try {
-    setPartialLeadsSaved(err, await persistLeads(data, partial));
+    await sink.acceptRemainder(partial);
   } catch (saveErr) {
     logger.warn(
       { err: saveErr, scrapeJobId: data.scrapeJobId },
       "could not save partial leads from a cut-short scrape"
     );
   }
+  setPartialLeadsSaved(err, sink.saved);
 }
 
 /**
@@ -123,7 +132,85 @@ function hasResultFilter(filter: ScrapeResultFilter | undefined): filter is Scra
 // accepts (scrapes.controller.ts#createSchema).
 const MAX_CANDIDATE_LEADS = 1000;
 
-async function runScrape(data: ScrapeJobData): Promise<{ leadsFound: number }> {
+/** How often a running job republishes its counters. */
+const PROGRESS_REPORT_INTERVAL_MS = 3_000;
+
+/**
+ * Collects the run's output as it happens: decides what to keep, writes it immediately, and
+ * publishes counters the job page can read while the scrape is still going.
+ *
+ * Two deliberate behaviours live here. Leads are saved one at a time rather than in a single batch
+ * at the end, so the job page fills in during the run instead of staying empty until it finishes.
+ * And when the job carries a follower/location filter, only leads that *match* it are written — a
+ * filtered run checks several candidates per lead it wants, and saving the rejects put accounts far
+ * outside the requested range into the user's leads list, which is exactly what the filter was
+ * supposed to prevent. Runs without a filter still save every profile they read.
+ */
+function createLeadSink(data: ScrapeJobData) {
+  const filter = hasResultFilter(data.resultFilter) ? data.resultFilter : null;
+  const matches = filter ? buildFilterPredicate(filter) : null;
+  let collected = 0;
+  let checked = 0;
+  let saved = 0;
+  let phase: "collecting" | "checking" = "collecting";
+  let lastReportAt = 0;
+
+  async function report(force = false): Promise<void> {
+    if (!force && Date.now() - lastReportAt < PROGRESS_REPORT_INTERVAL_MS) return;
+    lastReportAt = Date.now();
+    try {
+      await saveScrapeProgress(data.userId, data.scrapeJobId, {
+        phase,
+        collected,
+        checked,
+        saved,
+        target: filter ? data.capLeads : null,
+      });
+    } catch (err) {
+      logger.warn({ err, scrapeJobId: data.scrapeJobId }, "could not publish scrape progress");
+    }
+  }
+
+  return {
+    get saved() {
+      return saved;
+    },
+    keeps(lead: RawLead): boolean {
+      return !matches || matches(lead);
+    },
+    noteCollected(count: number): void {
+      collected = count;
+      void report();
+    },
+    startChecking(count: number): void {
+      phase = "checking";
+      collected = count;
+      void report(true);
+    },
+    /** Saves one freshly-read lead if it belongs in the results, then republishes the counters. */
+    async accept(lead: RawLead, matched: boolean): Promise<void> {
+      checked += 1;
+      if (matched) {
+        await persistLeads(data, [lead]);
+        saved += 1;
+      }
+      await report();
+    },
+    /** Saves a batch left over from a run that was cut short, keeping the same filter rule. */
+    async acceptRemainder(leads: RawLead[]): Promise<number> {
+      const keep = matches ? leads.filter(matches) : leads;
+      if (keep.length === 0) return 0;
+      const count = await persistLeads(data, keep);
+      saved += count;
+      await report(true);
+      return count;
+    },
+  };
+}
+
+type LeadSink = ReturnType<typeof createLeadSink>;
+
+async function runScrape(data: ScrapeJobData, sink: LeadSink): Promise<{ leadsFound: number }> {
   const account = await studioGet<XAccount>("x_accounts", data.xAccountId);
   if (!account) throw new Error(`X account ${data.xAccountId} not found`);
   if (!account.encryptedSession) {
@@ -139,14 +226,15 @@ async function runScrape(data: ScrapeJobData): Promise<{ leadsFound: number }> {
   try {
     const page = await session.context.newPage();
     const candidateCap = candidateCapFor(data);
-    const shouldCancel = createCancellationCheck(data.scrapeJobId);
+    const checkpoint = createRunCheckpoint(data.userId, data.scrapeJobId);
     const collectOpts = {
       page,
       sourceRef: data.sourceRef,
       capLeads: candidateCap,
       minScrollDelayMs: env.SCROLL_DELAY_MIN_MS,
       maxScrollDelayMs: env.SCROLL_DELAY_MAX_MS,
-      shouldCancel,
+      checkpoint,
+      onProgress: (count: number) => sink.noteCollected(count),
     };
 
     let rawLeads: RawLead[];
@@ -165,16 +253,18 @@ async function runScrape(data: ScrapeJobData): Promise<{ leadsFound: number }> {
         rawLeads = await scrollAndCollect(SOURCES[data.sourceType], collectOpts);
       }
     } catch (err) {
-      await savePartialLeads(data, err);
+      await savePartialLeads(data, sink, err);
       throw err;
     }
 
-    let enrichedLeads: RawLead[];
+    sink.startChecking(rawLeads.length);
+
     try {
-      enrichedLeads = await enrichLeadsFromProfiles(page, rawLeads, {
+      await enrichLeadsFromProfiles(page, rawLeads, {
         minDelayMs: env.PROFILE_DELAY_MIN_MS,
         maxDelayMs: env.PROFILE_DELAY_MAX_MS,
-        shouldCancel,
+        checkpoint,
+        onEnriched: (lead, matched) => sink.accept(lead, matched),
         // With a filter on the job, aim for capLeads *matching* leads out of the larger candidate
         // pool collected above; the enricher stops as soon as it has them.
         ...(hasResultFilter(data.resultFilter)
@@ -182,16 +272,13 @@ async function runScrape(data: ScrapeJobData): Promise<{ leadsFound: number }> {
           : {}),
       });
     } catch (err) {
-      // Enrichment stopped early (throttled part-way through the profile visits). Anything it
-      // already enriched rides out on the error; only if it got through none of them do the
-      // list-view leads stand in — and then only up to what the job actually asked for, since the
-      // candidate pool is deliberately oversized and its tail was never visited.
-      if (getPartialLeads(err).length === 0) attachPartialLeads(err, rawLeads.slice(0, data.capLeads));
-      await savePartialLeads(data, err);
+      // Every lead read before this point is already saved (sink.accept writes as it goes), so
+      // there is nothing left to rescue here — the count on the error is what the job reports.
+      setPartialLeadsSaved(err, sink.saved);
       throw err;
     }
 
-    return { leadsFound: await persistLeads(data, enrichedLeads) };
+    return { leadsFound: sink.saved };
   } finally {
     await closeScrapeSession(session);
   }
@@ -229,6 +316,8 @@ export function startScrapeWorker(): Worker<ScrapeJobData> {
         throw new DelayedError();
       }
 
+      const sink = createLeadSink(job.data);
+
       try {
         const withinQuota = await tryConsumeDailyQuota(xAccountId, account.dailyScrapeLimit);
         if (!withinQuota) {
@@ -237,7 +326,7 @@ export function startScrapeWorker(): Worker<ScrapeJobData> {
         }
 
         await markJobStatus(scrapeJobId, "running", undefined, { startedAt: new Date() });
-        const { leadsFound } = await runScrape(job.data);
+        const { leadsFound } = await runScrape(job.data, sink);
         await markJobStatus(scrapeJobId, "completed", undefined, { finishedAt: new Date(), leadsFound });
         await touchAccountLastUsed(xAccountId);
         await logActivity(job.data.userId, "scrape.completed", {
@@ -290,6 +379,11 @@ export function startScrapeWorker(): Worker<ScrapeJobData> {
         throw err; // real error: let BullMQ's attempts/backoff apply
       } finally {
         await releaseAccountSlot(slot);
+        // The run is over one way or another, so a pending "wrap up now" has nothing left to act
+        // on. Clearing it keeps a retry of this job from stopping itself on a stale request.
+        await clearScrapeFinishRequest(job.data.userId, scrapeJobId).catch((err: unknown) =>
+          logger.warn({ err, scrapeJobId }, "could not clear the finish request")
+        );
       }
     },
     { connection: redisConnection, concurrency: env.WORKER_CONCURRENCY }

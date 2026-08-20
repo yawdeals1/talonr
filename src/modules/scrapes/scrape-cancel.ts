@@ -2,6 +2,7 @@ import { studioGet } from "../../db/studio-client.js";
 import type { ScrapeJob } from "../../db/schema.js";
 import { logger } from "../../lib/logger.js";
 import { ScrapeCancelledError } from "../../scraper/types.js";
+import { isScrapeFinishRequested } from "./scrape-results.service.js";
 
 /**
  * How a cancelled run is recorded.
@@ -16,41 +17,59 @@ import { ScrapeCancelledError } from "../../scraper/types.js";
  */
 export const CANCELLED_ERROR_MESSAGE = "Cancelled by user";
 
-/** How long a run may go between cancellation checks. */
-const CANCEL_POLL_INTERVAL_MS = 8_000;
+/** How long a run may go between checks for a stop request. */
+const CONTROL_POLL_INTERVAL_MS = 8_000;
+
+/**
+ * What a running scrape should do at its next checkpoint.
+ *
+ * "finish" is the deliberate, non-destructive stop the user asks for with "Finish now": stop
+ * looking for more, keep everything found so far, and let the job complete normally. A cancel is
+ * the other thing entirely and comes through as a thrown `ScrapeCancelledError`.
+ */
+export type RunVerdict = "continue" | "finish";
 
 export function isCancelledJob(job: Pick<ScrapeJob, "status" | "errorMessage">): boolean {
   return job.status === "failed" && job.errorMessage === CANCELLED_ERROR_MESSAGE;
 }
 
 /**
- * Builds the "has the user asked this run to stop?" probe the worker calls at its checkpoints
- * (each scroll round, before each profile visit). Throws `ScrapeCancelledError` once the request
- * is in, which unwinds through the same partial-lead path a throttled run uses — so a cancelled
- * scrape keeps the leads it had already collected instead of throwing them away.
+ * Builds the "should this run keep going?" probe the worker calls at its checkpoints — each scroll
+ * round, and before each profile visit. It answers one of two ways:
  *
- * The signal is the job row itself rather than an in-memory flag or a Redis key, for two reasons:
- * the API and the worker are separate processes, and a cancel has to survive a worker restart —
- * BullMQ hands a stalled job to the next worker, which would otherwise re-run a scrape the user
- * had already stopped. Reads are throttled to one per CANCEL_POLL_INTERVAL_MS so a long run costs
- * a handful of extra Studio calls, not one per scroll round.
+ * - throws `ScrapeCancelledError` when the run was cancelled, which unwinds through the same
+ *   partial-lead path a throttled run uses, so a cancelled scrape keeps the leads it already had;
+ * - returns `"finish"` when the user asked it to wrap up, so the caller stops looking for more and
+ *   lets the job complete normally with what it found.
+ *
+ * Both signals are database rows rather than in-memory flags or Redis keys, for two reasons: the
+ * API and the worker are separate processes, and a stop has to survive a worker restart — BullMQ
+ * hands a stalled job to the next worker, which would otherwise re-run a scrape the user had
+ * already stopped. Reads are throttled to one round trip per CONTROL_POLL_INTERVAL_MS, so a long
+ * run costs a handful of extra Studio calls rather than two per scroll round.
  */
-export function createCancellationCheck(scrapeJobId: string): () => Promise<void> {
+export function createRunCheckpoint(userId: string, scrapeJobId: string): () => Promise<RunVerdict> {
   let lastCheckedAt = 0;
   let cancelled = false;
+  let verdict: RunVerdict = "continue";
 
   return async () => {
     if (cancelled) throw new ScrapeCancelledError();
-    if (Date.now() - lastCheckedAt < CANCEL_POLL_INTERVAL_MS) return;
+    if (verdict === "finish") return "finish";
+    if (Date.now() - lastCheckedAt < CONTROL_POLL_INTERVAL_MS) return "continue";
     lastCheckedAt = Date.now();
 
     let job: ScrapeJob | null;
+    let finishRequested: boolean;
     try {
-      job = await studioGet<ScrapeJob>("scrape_jobs", scrapeJobId);
+      [job, finishRequested] = await Promise.all([
+        studioGet<ScrapeJob>("scrape_jobs", scrapeJobId),
+        isScrapeFinishRequested(userId, scrapeJobId),
+      ]);
     } catch (err) {
       // A failed poll must not kill a healthy run — the next checkpoint tries again.
-      logger.warn({ err, scrapeJobId }, "could not check whether the scrape was cancelled");
-      return;
+      logger.warn({ err, scrapeJobId }, "could not check whether the scrape was asked to stop");
+      return "continue";
     }
 
     // A job row deleted mid-run is as good as cancelled: there is nowhere left to report to.
@@ -58,5 +77,11 @@ export function createCancellationCheck(scrapeJobId: string): () => Promise<void
       cancelled = true;
       throw new ScrapeCancelledError();
     }
+
+    if (finishRequested) {
+      logger.info({ scrapeJobId }, "finishing early at the user's request");
+      verdict = "finish";
+    }
+    return verdict;
   };
 }

@@ -33,11 +33,14 @@ export interface ScrapeSourceContext {
    */
   into?: Map<string, RawLead>;
   /**
-   * Checkpoint the collector calls once per scroll round; it throws `ScrapeCancelledError` when
-   * the user has cancelled the run. Injected as a callback so the scraper modules stay free of
-   * database imports — the worker owns where the signal comes from.
+   * Called once per scroll round to ask whether the run should keep going. It throws
+   * `ScrapeCancelledError` on a cancel and returns "finish" when the user asked the run to wrap up
+   * with what it has. Injected as a callback so the scraper modules stay free of database imports —
+   * the worker owns where the signal comes from.
    */
-  shouldCancel?: () => Promise<void>;
+  checkpoint?: () => Promise<"continue" | "finish">;
+  /** Called after each scroll round with the number of unique handles collected so far. */
+  onProgress?: (collected: number) => void;
 }
 
 export interface ScrapeSource {

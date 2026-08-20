@@ -5,13 +5,21 @@ import { getAccount } from "../api/accounts";
 import { ApiError } from "../api/client";
 import { createLeadList } from "../api/leadLists";
 import { bulkDeleteLeads } from "../api/leads";
-import { cancelScrape, deleteScrape, getScrape, listScrapeLeads, updateScrapeResultFilter } from "../api/scrapes";
+import {
+  cancelScrape,
+  deleteScrape,
+  finishScrape,
+  getScrape,
+  listScrapeLeads,
+  updateScrapeResultFilter,
+} from "../api/scrapes";
 import type { Lead, ScrapeResultFilter } from "../api/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
 import { LeadDetailDrawer } from "../components/LeadDetailDrawer";
 import { LeadsTable } from "../components/LeadsTable";
 import { Modal } from "../components/Modal";
+import { ScrapeProgressPanel } from "../components/ScrapeProgressPanel";
 import { SkeletonRows } from "../components/Skeleton";
 import { StatusPill } from "../components/StatusPill";
 import { formatDateTime, formatNumber } from "../lib/format";
@@ -43,7 +51,7 @@ export function ScrapeJobDetail() {
     queryFn: () => getScrape(id!),
     refetchInterval: (query) => {
       const status = query.state.data?.scrapeJob.status;
-      return status === "queued" || status === "running" ? 5000 : false;
+      return status === "queued" || status === "running" ? 3000 : false;
     },
   });
 
@@ -68,6 +76,9 @@ export function ScrapeJobDetail() {
     queryFn: () => listScrapeLeads(id!, leadsPage, LEADS_PAGE_SIZE),
     enabled: !!job,
     refetchInterval: job?.status === "queued" || job?.status === "running" ? 5000 : false,
+    // Keep the rows already on screen while the next poll is in flight, so a live-updating list
+    // doesn't flash empty every few seconds.
+    placeholderData: (previous) => previous,
   });
   const leads = leadsQuery.data?.leads ?? [];
   const hasLeadFilters = Object.keys(job?.resultFilterDefinition ?? {}).length > 0;
@@ -171,6 +182,14 @@ export function ScrapeJobDetail() {
     },
   });
 
+  const finishMutation = useMutation({
+    mutationFn: () => finishScrape(id!),
+    onSuccess: ({ scrapeJob }) => {
+      queryClient.setQueryData(["scrapes", id], { scrapeJob });
+      queryClient.invalidateQueries({ queryKey: ["scrapes"] });
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: () => deleteScrape(id!),
     onSuccess: () => {
@@ -216,6 +235,8 @@ export function ScrapeJobDetail() {
         </div>
       )}
 
+      <ScrapeProgressPanel job={job} />
+
       <dl className="grid grid-cols-2 gap-4 rounded-lg border p-4 text-sm sm:grid-cols-4">
         <div>
           {/* A filtered run checks more profiles than it needs so it can find a full cap of
@@ -252,13 +273,32 @@ export function ScrapeJobDetail() {
           >
             {cancelMutation.isPending ? "Stopping…" : job.status === "running" ? "Stop scrape" : "Cancel scrape"}
           </button>
+          {job.status === "running" && (
+            <button
+              type="button"
+              onClick={() => finishMutation.mutate()}
+              disabled={finishMutation.isPending || finishMutation.isSuccess}
+              className="ml-2 rounded-md border px-4 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-50 dark:hover:bg-zinc-800"
+            >
+              {finishMutation.isSuccess ? "Finishing…" : finishMutation.isPending ? "Asking…" : "Finish now"}
+            </button>
+          )}
           <p className="mt-2 text-xs text-zinc-500">
             {job.status === "running"
-              ? "The run stops at its next checkpoint — within about ten seconds — and keeps every lead it has already collected."
+              ? "Stopping ends the run at its next checkpoint — within about ten seconds — and keeps every lead it has already collected. Finishing does the same but lets the scrape complete normally instead of being marked cancelled."
               : "This scrape hasn't started yet, so it will be taken off the queue."}
           </p>
-          {cancelMutation.error instanceof ApiError && (
-            <p className="mt-2 text-sm text-status-danger">{cancelMutation.error.message}</p>
+          {finishMutation.isSuccess && (
+            <p className="mt-2 text-xs text-zinc-500">
+              Asked to wrap up — the run stops looking at its next checkpoint and completes with what it found.
+            </p>
+          )}
+          {[cancelMutation.error, finishMutation.error].map((error, index) =>
+            error instanceof ApiError ? (
+              <p key={index} className="mt-2 text-sm text-status-danger">
+                {error.message}
+              </p>
+            ) : null
           )}
         </div>
       )}

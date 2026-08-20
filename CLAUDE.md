@@ -284,7 +284,20 @@ no retry — per the safety requirement. A `checkpointed`/`banned` account can't
 back to `active` through `PATCH /accounts/:id` (`accounts.service.ts#updateAccount`) — that would
 let a user silently bypass the safety trip; resuming requires re-running the login script.
 
-### Cancelling a run (`modules/scrapes/scrape-cancel.ts`)
+### Stopping a run: cancel vs. finish (`modules/scrapes/scrape-cancel.ts`)
+
+Two different things a user can ask of a run in flight, both answered at the same checkpoints:
+
+- **Cancel** (`POST /scrapes/:id/cancel`) — stop and mark the job cancelled.
+- **Finish now** (`POST /scrapes/:id/finish`) — stop *looking* but let the job complete normally
+  with everything it found. Only valid while a job is `running`; a queued job has nothing to wrap
+  up, so it says to cancel instead. The request is a row of its own
+  (`__talonr_scrape_finish__:<jobId>`) rather than a field in the result store, because the store's
+  `filter_definition` is one JSONB column that the running worker rewrites every few seconds for
+  progress — a flag written into it by the API would be clobbered. The API only creates that row;
+  the worker only reads it, and deletes it when the run ends.
+
+### Cancelling a run
 
 `POST /scrapes/:id/cancel` works on a **queued or running** job. A queued one is pulled out of the
 BullMQ queue; a running one can't be killed from the API process (the Playwright run is in the
@@ -340,16 +353,25 @@ keyed by lowercased handle, `page.mouse.wheel` scroll, random delay from
 unique profile sequentially using `PROFILE_DELAY_MIN_MS`/`PROFILE_DELAY_MAX_MS`, merges bio,
 followers, location, verification, and avatar, then the worker upserts the complete leads.
 
-**A job's result filter steers the run, it doesn't just hide rows afterwards.** When
+**A job's result filter steers the run, and decides what the run keeps.** When
 `POST /scrapes` carried a `resultFilterDefinition`, it rides on the BullMQ job (`ScrapeJobData`'s
 `resultFilter`) and `scrape.worker.ts` collects a *candidate pool* of
 `capLeads × SCRAPE_FILTER_CANDIDATE_MULTIPLIER` (hard-capped at 1000) instead of `capLeads`, then
 hands `enrichLeadsFromProfiles` a `target` so it stops as soon as `capLeads` enriched leads match.
-Leads are still written unfiltered — every profile actually visited is saved, matching or not; the
-filter only decides how long the run keeps looking. Without it, a "100–2000 followers, 10 leads"
-scrape enriched the first 10 accounts in the list and displayed the 2 that happened to match,
-which is what "the follower filter doesn't work" looked like from the outside. The multiplier is
-the bound that stops this becoming an unbounded crawl.
+**A filtered run saves only the leads that match** (`scrape.worker.ts#createLeadSink`) — the one
+deliberate exception to "scrapes write unfiltered". It has to check several candidates per lead it
+wants, and writing the rejects too put 300k-follower accounts into the leads list of someone who
+asked for 100–2000, which is the whole thing the filter exists to prevent. A run *without* a filter
+still saves every profile it reads, so the "one scrape, many filter iterations" property holds
+wherever the user hasn't already committed to a range. Leads cut short during collection have no
+follower count yet, so a filtered run keeps none of them: an unverified lead can't be claimed to
+match. The multiplier is the bound that stops this becoming an unbounded crawl.
+
+**Leads are written one at a time, as the run reads them**, not in a single batch at the end, and
+the worker republishes counters (`saveScrapeProgress`, at most every 3s) into the result store as
+it goes. That is what makes the job page show a run in flight — profiles checked, matching leads
+saved, and the rows themselves — instead of nothing at all until the whole scrape ends.
+
 `detectors.ts#checkHealth` checks URL patterns
 (login/challenge/lockdown redirects), a captcha iframe selector, and X's own status text;
 `watchForRateLimitResponses` listens for HTTP 429s and is wired into **both** the collection phase
@@ -413,6 +435,7 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 | POST | /scrapes | auth | Create a scrape_jobs row + enqueue BullMQ job (`xAccountId`, `sourceType`: `search`\|`followers`\|`engagers`, `sourceRef`, `engagementTypes?` required for `engagers`, `capLeads?`, `resultFilterDefinition?` — a follower/location filter that both steers the run toward `capLeads` matching leads and becomes the job's saved results view) — rate-limited per user |
 | GET | /scrapes | auth | List own jobs, filterable by `status`/`xAccountId` |
 | GET | /scrapes/:id | auth | Job detail/status |
+| POST | /scrapes/:id/finish | auth | Ask a **running** scrape to stop looking and complete with what it has already found (not a cancel — the job ends as `completed`) |
 | POST | /scrapes/:id/cancel | auth | Cancels a queued **or running** scrape — removes a not-yet-started job from the queue, and marks a running one cancelled so the worker stops at its next checkpoint and saves what it collected |
 | DELETE | /scrapes/:id | auth | Deletes a non-running scrape record/queue entry; collected leads remain saved |
 | GET | /leads | auth | Paginated own leads, filterable by `handle`/`sourceType`/`sourceRef`/`minFollowers`/`maxFollowers`/`location`; returns the full matched `total` alongside the page |

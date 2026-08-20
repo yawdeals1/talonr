@@ -6,6 +6,7 @@ import {
   createScrapeJob,
   deleteScrapeJob,
   deleteScrapeJobs,
+  finishScrapeJobEarly,
   getScrapeJob,
   listScrapeJobLeads,
   updateScrapeResultFilter,
@@ -246,6 +247,37 @@ describe("scrapes.service ownership isolation", () => {
     await cancelScrapeJob(OWNER, JOB_ID);
 
     expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it("finishScrapeJobEarly: records a wrap-up request for a running job", async () => {
+    // Not a cancel: the run stops looking but the job still completes with what it found.
+    studioGet.mockResolvedValue({ ...ownedJob, status: "running" });
+    studioInsert.mockResolvedValue({});
+
+    await finishScrapeJobEarly(OWNER, JOB_ID);
+
+    expect(studioInsert).toHaveBeenCalledWith(
+      "lead_lists",
+      expect.objectContaining({
+        userId: OWNER,
+        name: `__talonr_scrape_finish__:${JOB_ID}`,
+        filterDefinition: expect.objectContaining({ finishRequested: true, scrapeJobId: JOB_ID }),
+      })
+    );
+    // The job row is the worker's to write when it actually stops.
+    expect(studioUpdate).not.toHaveBeenCalled();
+  });
+
+  it("finishScrapeJobEarly: a queued job has nothing to wrap up", async () => {
+    studioGet.mockResolvedValue(ownedJob);
+    await expect(finishScrapeJobEarly(OWNER, JOB_ID)).rejects.toBeInstanceOf(ValidationError);
+    expect(studioInsert).not.toHaveBeenCalled();
+  });
+
+  it("finishScrapeJobEarly: a different user cannot touch someone else's run", async () => {
+    studioGet.mockResolvedValue({ ...ownedJob, status: "running" });
+    await expect(finishScrapeJobEarly(ATTACKER, JOB_ID)).rejects.toBeInstanceOf(NotFoundError);
+    expect(studioInsert).not.toHaveBeenCalled();
   });
 
   it("cancelScrapeJob: refuses a job that has already finished", async () => {

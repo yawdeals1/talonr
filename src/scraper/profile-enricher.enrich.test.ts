@@ -140,8 +140,9 @@ describe("enrichLeadsFromProfiles", () => {
 
     const promise = enrichLeadsFromProfiles(page, ["a", "b", "c"].map(rawLead), {
       ...noDelay,
-      shouldCancel: async () => {
+      checkpoint: async () => {
         if (visitsBeforeCancel-- <= 0) throw new ScrapeCancelledError();
+        return "continue";
       },
     });
 
@@ -150,6 +151,47 @@ describe("enrichLeadsFromProfiles", () => {
     await promise.catch((err: unknown) => {
       expect(getPartialLeads(err).map((lead) => lead.handle)).toEqual(["a", "b"]);
     });
+  });
+
+  it("wraps up on a finish request, keeping what it already read", async () => {
+    // "Finish now" is not a cancel: the run stops looking and the job completes with its leads.
+    const { page, visits } = fakePage({
+      a: [{ followersCandidates: ["10 Followers"] }],
+      b: [{ followersCandidates: ["20 Followers"] }],
+      c: [{ followersCandidates: ["30 Followers"] }],
+    });
+    let visitsBeforeFinish = 2;
+
+    const enriched = await enrichLeadsFromProfiles(page, ["a", "b", "c"].map(rawLead), {
+      ...noDelay,
+      checkpoint: async () => (visitsBeforeFinish-- <= 0 ? "finish" : "continue"),
+    });
+
+    expect(visits).toEqual(["a", "b"]);
+    expect(enriched.map((lead) => lead.handle)).toEqual(["a", "b"]);
+  });
+
+  it("hands each lead over as it is read, so the caller can save it mid-run", async () => {
+    // Leads used to be written in one batch after the whole run; the job page stayed empty until
+    // then. Now the worker saves each one through this callback as it arrives.
+    const { page } = fakePage({
+      small: [{ followersCandidates: ["5 Followers"] }],
+      big: [{ followersCandidates: ["4,200 Followers"] }],
+    });
+    const handed: Array<[string, boolean]> = [];
+
+    await enrichLeadsFromProfiles(page, ["small", "big"].map(rawLead), {
+      ...noDelay,
+      target: { count: 5, matches: (lead) => (lead.followers ?? 0) >= 100 },
+      onEnriched: async (lead, matched) => {
+        handed.push([lead.handle, matched]);
+      },
+    });
+
+    expect(handed).toEqual([
+      ["small", false],
+      ["big", true],
+    ]);
   });
 
   it("visits every lead when the job carries no filter", async () => {

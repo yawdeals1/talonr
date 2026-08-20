@@ -53,6 +53,11 @@ export function cancelScrape(id: string): Promise<{ scrapeJob: ScrapeJob }> {
   return apiFetch(`/scrapes/${id}/cancel`, { method: "POST" });
 }
 
+/** Asks a running scrape to stop looking and complete with what it has already found. */
+export function finishScrape(id: string): Promise<{ scrapeJob: ScrapeJob }> {
+  return apiFetch(`/scrapes/${id}/finish`, { method: "POST" });
+}
+
 export function deleteScrape(id: string): Promise<void> {
   return apiFetch(`/scrapes/${id}`, { method: "DELETE" });
 }

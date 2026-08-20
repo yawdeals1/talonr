@@ -31,19 +31,25 @@ export interface ProfileEnrichmentOptions {
    * Stop as soon as `count` visited leads satisfy `matches`. Set when the scrape carries a result
    * filter, so a "100–2000 followers" run keeps visiting candidates until it has that many
    * *matching* leads instead of spending its whole budget on the first N accounts in the list.
-   * Leads that don't match are still returned (and saved) — filtering steers the run, it never
-   * discards what was already scraped.
+   * Every visited lead is still handed to `onEnriched` — with a flag saying whether it matched, so
+   * the caller decides what to keep.
    */
   target?: {
     matches: (lead: RawLead) => boolean;
     count: number;
   };
   /**
-   * Checkpoint called before each profile visit; throws `ScrapeCancelledError` once the user has
-   * cancelled the run. Enrichment is the long tail of a scrape (one page load per lead), so this
-   * is where a cancel usually lands.
+   * Asked before each profile visit whether to keep going: throws `ScrapeCancelledError` on a
+   * cancel, returns "finish" when the user asked the run to wrap up with what it has. Enrichment is
+   * the long tail of a scrape (one page load per lead), so this is where a stop usually lands.
    */
-  shouldCancel?: () => Promise<void>;
+  checkpoint?: () => Promise<"continue" | "finish">;
+  /**
+   * Called with each lead as soon as its profile has been read, before the next visit starts.
+   * The worker saves leads through this rather than in one batch at the end, so the job page fills
+   * in while the run is still going instead of staying empty until it finishes.
+   */
+  onEnriched?: (lead: RawLead, matched: boolean) => Promise<void>;
 }
 
 // One extra visit for a profile whose header never rendered. X's profile header hydrates after
@@ -210,8 +216,10 @@ function mergeProfileDetails(lead: RawLead, details: ProfileDetails): RawLead {
  *
  * Returns only the leads it actually visited. With `options.target` set it stops as soon as enough
  * of them match, so the caller can hand in a larger candidate pool than it needs and let the
- * filter decide where the run ends. Whatever it managed to enrich before an account-health error
- * rides out on the error as partials, so a throttled run still reports the leads it got.
+ * filter decide where the run ends; `options.checkpoint` can end it sooner still. Each lead is
+ * handed to `options.onEnriched` as it is read, so the caller can persist it immediately rather
+ * than waiting for the whole run. Whatever it enriched before an account-health error rides out on
+ * the error as partials, so a throttled run still reports the leads it got.
  */
 export async function enrichLeadsFromProfiles(
   page: Page,
@@ -229,9 +237,19 @@ export async function enrichLeadsFromProfiles(
     for (const [index, lead] of leads.entries()) {
       let result = lead;
 
+      let verdict: "continue" | "finish";
+      try {
+        verdict = (await options.checkpoint?.()) ?? "continue";
+      } catch (err) {
+        // A cancel raised here is outside the per-attempt catch below, so it has to carry the
+        // enriched leads out itself — otherwise stopping between two profiles reported nothing.
+        attachPartialLeads(err, enriched);
+        throw err;
+      }
+      if (verdict === "finish") break;
+
       for (let attempt = 1; attempt <= PROFILE_ATTEMPTS; attempt += 1) {
         try {
-          await options.shouldCancel?.();
           if (rateLimitStatus !== null) throw new RateLimitedError(`X returned HTTP ${rateLimitStatus}`);
           result = mergeProfileDetails(lead, await visitProfile(page, lead.handle));
           if (result.followers !== null) break;
@@ -260,10 +278,17 @@ export async function enrichLeadsFromProfiles(
       }
 
       enriched.push(result);
-      if (options.target && options.target.matches(result)) {
-        matched += 1;
-        if (matched >= options.target.count) break;
+      const isMatch = !options.target || options.target.matches(result);
+      if (isMatch) matched += 1;
+
+      try {
+        await options.onEnriched?.(result, isMatch);
+      } catch (err) {
+        // Saving is the worker's business; a failed write must not abandon the rest of the run.
+        logger.warn({ err, handle: result.handle }, "could not save lead mid-run; continuing");
       }
+
+      if (options.target && matched >= options.target.count) break;
 
       if (index < leads.length - 1) {
         await randomDelay(options.minDelayMs, options.maxDelayMs);

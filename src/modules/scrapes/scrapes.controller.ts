@@ -8,6 +8,7 @@ import {
   createScrapeJob,
   deleteScrapeJob,
   deleteScrapeJobs,
+  finishScrapeJobEarly,
   getScrapeJob,
   listScrapeJobLeads,
   listScrapeJobs,
@@ -119,6 +120,10 @@ export async function updateResultFilter(req: AuthedRequest, res: Response) {
 
 export async function cancel(req: AuthedRequest, res: Response) {
   res.json({ scrapeJob: await cancelScrapeJob(req.user!.id, req.params.id) });
+}
+
+export async function finishEarly(req: AuthedRequest, res: Response) {
+  res.json({ scrapeJob: await finishScrapeJobEarly(req.user!.id, req.params.id) });
 }
 
 export async function remove(req: AuthedRequest, res: Response) {

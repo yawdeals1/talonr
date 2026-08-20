@@ -33,6 +33,16 @@ export type SourceType = "search" | "followers" | "likers" | "engagers";
 export type EngagementType = "repliers" | "retweeters";
 export type ScrapeJobStatus = "queued" | "running" | "completed" | "failed" | "paused";
 
+/** Live counters a running scrape publishes so the job page can show what it's doing. */
+export interface ScrapeProgress {
+  phase: "collecting" | "checking";
+  collected: number;
+  checked: number;
+  saved: number;
+  target: number | null;
+  updatedAt: string;
+}
+
 export interface ScrapeJob {
   id: string;
   userId: string;
@@ -42,6 +52,7 @@ export interface ScrapeJob {
   engagementTypes: EngagementType[] | null;
   resultFilterDefinition: ScrapeResultFilter;
   tracksExactLeads: boolean;
+  progress: ScrapeProgress | null;
   status: ScrapeJobStatus;
   leadsFound: number;
   errorMessage: string | null;
