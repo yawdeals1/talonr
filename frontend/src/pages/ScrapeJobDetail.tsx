@@ -42,6 +42,7 @@ export function ScrapeJobDetail() {
   const [minFollowers, setMinFollowers] = useState("");
   const [maxFollowers, setMaxFollowers] = useState("");
   const [location, setLocation] = useState("");
+  const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [initializedFilterJobId, setInitializedFilterJobId] = useState<string | null>(null);
   const [filterError, setFilterError] = useState<string | null>(null);
   const idPrefix = useId();
@@ -62,6 +63,7 @@ export function ScrapeJobDetail() {
     setMinFollowers(job.resultFilterDefinition.minFollowers?.toString() ?? "");
     setMaxFollowers(job.resultFilterDefinition.maxFollowers?.toString() ?? "");
     setLocation(job.resultFilterDefinition.location ?? "");
+    setVerifiedOnly(job.resultFilterDefinition.verifiedOnly ?? false);
     setInitializedFilterJobId(job.id);
   }, [initializedFilterJobId, job]);
 
@@ -141,6 +143,7 @@ export function ScrapeJobDetail() {
       ...(min !== undefined ? { minFollowers: min } : {}),
       ...(max !== undefined ? { maxFollowers: max } : {}),
       ...(locationFilter ? { location: locationFilter } : {}),
+      ...(verifiedOnly ? { verifiedOnly: true } : {}),
     };
     filterMutation.mutate(nextFilters);
   }
@@ -149,6 +152,7 @@ export function ScrapeJobDetail() {
     setMinFollowers("");
     setMaxFollowers("");
     setLocation("");
+    setVerifiedOnly(false);
     setFilterError(null);
     filterMutation.mutate({});
   }
@@ -410,6 +414,16 @@ export function ScrapeJobDetail() {
               />
             </div>
           </div>
+
+          <label className="mt-3 flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+            <input
+              type="checkbox"
+              checked={verifiedOnly}
+              onChange={(event) => setVerifiedOnly(event.target.checked)}
+              className="h-4 w-4 shrink-0 accent-accent"
+            />
+            Verified accounts only
+          </label>
 
           <div className="mt-3 flex items-center justify-between gap-3">
             <p className="text-xs text-zinc-500">

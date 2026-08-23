@@ -181,10 +181,24 @@ i.e. the least rounding. X puts the exact count on a descendant span
 (`<a href="/x/verified_followers"><span title="51,132">51.1K</span> Followers</a>`), so reading
 only the anchor's own attributes stored every account over ~10k rounded to three significant
 digits (51,132 saved as 51,100), and made an account with 999 followers store as 1000 and pass a
-`minFollowers: 1000` filter it should have failed. `UserName` is not a sufficient hydration gate
-either — the stats row renders after it, so `profile-enricher.ts` waits for the followers link and
-retries a profile once when the count still came back null, since a null-follower lead is invisible
-to every follower-range filter.
+`minFollowers: 1000` filter it should have failed. (Checked live on 2026-08-23, X was serving
+*neither* attribute on the stats link — just the anchor's text, exact under ~10k ("1,240
+Followers") and rounded above it ("1.7M Followers"). `pickFollowerCount` degrades to the rounded
+value on its own, and keeps working if X puts the exact one back, so this is a note rather than a
+change.) `UserName` is not a sufficient hydration gate either — the stats row renders after it, so
+`profile-enricher.ts` waits for the followers link and retries a profile once when the count still
+came back null, since a null-follower lead is invisible to every follower-range filter.
+
+**A profile's health is checked once it has drawn, not when the navigation commits.**
+`visitProfile` used to run `checkHealth` immediately after `goto`, which is exactly when X's
+generic "Something went wrong. Try reloading." boundary is most likely to be up — and a
+`TransientPageError` fails the visit. Because a failed visit is best-effort, the lead was still
+saved, just with nothing but its list-view data: no bio, no follower count, no location, and so
+invisible to every follower-range filter, with nothing anywhere saying the run had gone wrong. The
+check now runs after the header selector resolves; if the header never draws, the check runs *then*
+to classify why (a login wall or captcha still raises the account-health error the worker
+checkpoints on). The second check, after the read, no longer discards a profile it already read
+over a transient boundary — only an account-health error still ends the run there.
 
 ## Auth (`src/modules/auth/`)
 
@@ -474,6 +488,15 @@ wherever the user hasn't already committed to a range. Leads cut short during co
 follower count yet, so a filtered run keeps none of them: an unverified lead can't be claimed to
 match. The multiplier is the bound that stops this becoming an unbounded crawl.
 
+**`verifiedOnly` is the one bound applied before the profile pass, not after it.** X draws the same
+`svg[data-testid="icon-verified"]` badge on a `UserCell` that it draws on a profile header, so both
+list parsers already read it during collection — the profile visit would check the identical node
+and learn nothing new. `scrape.worker.ts#runScrape` therefore drops unverified candidates straight
+after collection, which is what keeps a verified-only run from spending its clock, and its request
+budget against X, on profiles it was always going to discard. Follower counts and locations are
+knowable only from the profile, so they stay where they are: judged after the visit. It is also the
+only filter that still works on a lead whose enrichment came back empty.
+
 **Leads are written one at a time, as the run reads them**, not in a single batch at the end, and
 the worker republishes counters (`saveScrapeProgress`, at most every 3s) into the result store as
 it goes. That is what makes the job page show a run in flight — profiles checked, matching leads
@@ -569,7 +592,7 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 | PATCH | /accounts/:id | auth | Update dailyScrapeLimit / maxConcurrency / status (cannot reactivate a checkpointed/banned account — see below) |
 | POST | /accounts/:id/revalidate | auth | Queue a live check of a **checkpointed** account's stored session against X; reactivates it only if X answers with a signed-in session, otherwise leaves it alone and says why. The alternative to re-running the login script |
 | DELETE | /accounts/:id | auth | Delete own account (cascades scrape_jobs) |
-| POST | /scrapes | auth | Create a scrape_jobs row + enqueue BullMQ job (`xAccountId`, `sourceType`: `search`\|`followers`\|`engagers`, `sourceRef`, `engagementTypes?` required for `engagers`, `capLeads?` — defaults to `SCRAPE_CAP_LEADS_DEFAULT` (100), `resultFilterDefinition?` — a follower/location filter that both steers the run toward `capLeads` matching leads and becomes the job's saved results view) — rate-limited per user |
+| POST | /scrapes | auth | Create a scrape_jobs row + enqueue BullMQ job (`xAccountId`, `sourceType`: `search`\|`followers`\|`engagers`, `sourceRef`, `engagementTypes?` required for `engagers`, `capLeads?` — defaults to `SCRAPE_CAP_LEADS_DEFAULT` (100), `resultFilterDefinition?` — a follower/location/`verifiedOnly` filter that both steers the run toward `capLeads` matching leads and becomes the job's saved results view) — rate-limited per user |
 | GET | /scrapes | auth | List own jobs, filterable by `status`/`xAccountId` |
 | GET | /scrapes/:id | auth | Job detail/status |
 | POST | /scrapes/:id/finish | auth | Ask a **running** scrape to stop looking and complete with what it has already found (not a cancel — the job ends as `completed`) |

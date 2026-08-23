@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Page } from "playwright";
-import { getPartialLeads, ScrapeCancelledError, type RawLead } from "./types.js";
+import {
+  getPartialLeads,
+  LoginChallengeError,
+  ScrapeCancelledError,
+  TransientPageError,
+  type RawLead,
+} from "./types.js";
 
 const detectors = vi.hoisted(() => ({
   checkHealth: vi.fn(async () => undefined),
@@ -206,5 +212,38 @@ describe("enrichLeadsFromProfiles", () => {
 
     expect(visits).toEqual(["a", "b", "c"]);
     expect(enriched).toHaveLength(3);
+  });
+});
+
+describe("enrichLeadsFromProfiles page health", () => {
+  it("reads a profile whose error boundary was on screen while the SPA hydrated", async () => {
+    // The check used to run the instant the navigation committed — before the profile had drawn
+    // anything, which is exactly when X's generic "Something went wrong" boundary is most likely to
+    // be up. It failed the visit, and since a failed visit is best-effort the lead was saved with
+    // its list-view data alone: no bio, no follower count, no location, and no error anywhere.
+    detectors.checkHealth.mockRejectedValue(new TransientPageError("Something went wrong"));
+    const { page } = fakePage({
+      someone: [{ bio: "Building things", location: "Accra", followersCandidates: ["1,240 Followers"] }],
+    });
+
+    const [enriched] = await enrichLeadsFromProfiles(page, [rawLead("someone")], {
+      minDelayMs: 1,
+      maxDelayMs: 1,
+    });
+
+    expect(enriched?.followers).toBe(1240);
+    expect(enriched?.bio).toBe("Building things");
+    expect(enriched?.location).toBe("Accra");
+  });
+
+  it("still ends the run when X challenges the session mid-visit", async () => {
+    // The reason the check is there at all. Softening the transient case must not soften this one:
+    // the worker checkpoints the account on it.
+    detectors.checkHealth.mockRejectedValue(new LoginChallengeError("https://x.com/i/flow/login"));
+    const { page } = fakePage({ someone: [{ followersCandidates: ["1,240 Followers"] }] });
+
+    await expect(
+      enrichLeadsFromProfiles(page, [rawLead("someone")], { minDelayMs: 1, maxDelayMs: 1 })
+    ).rejects.toBeInstanceOf(LoginChallengeError);
   });
 });

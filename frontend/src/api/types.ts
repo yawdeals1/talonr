@@ -82,6 +82,7 @@ export interface ScrapeResultFilter {
   minFollowers?: number;
   maxFollowers?: number;
   location?: string;
+  verifiedOnly?: boolean;
 }
 
 export interface Lead {

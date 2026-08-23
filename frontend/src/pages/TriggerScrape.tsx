@@ -50,6 +50,7 @@ export function TriggerScrape() {
   const [minFollowers, setMinFollowers] = useState("");
   const [maxFollowers, setMaxFollowers] = useState("");
   const [location, setLocation] = useState("");
+  const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const idPrefix = useId();
 
@@ -109,6 +110,9 @@ export function TriggerScrape() {
         ...(min !== undefined ? { minFollowers: min } : {}),
         ...(max !== undefined ? { maxFollowers: max } : {}),
         ...(locationFilter ? { location: locationFilter } : {}),
+        // Sent only when checked: an unchecked box is no filter at all, and sending `false` would
+        // put the run on the filtered path for a bound that excludes nobody.
+        ...(verifiedOnly ? { verifiedOnly: true } : {}),
     };
     mutation.mutate({
       xAccountId,
@@ -311,6 +315,22 @@ export function TriggerScrape() {
               className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
             />
           </div>
+
+          <label className="flex items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+            <input
+              type="checkbox"
+              checked={verifiedOnly}
+              onChange={(event) => setVerifiedOnly(event.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-accent"
+            />
+            <span>
+              Verified accounts only
+              <span className="mt-0.5 block text-xs font-normal text-zinc-500">
+                Read from the list itself, so unverified accounts are skipped without spending a profile
+                check on them — this makes the scrape reach its cap faster.
+              </span>
+            </span>
+          </label>
 
           <p className="text-xs text-zinc-500">
             Accounts with unknown follower counts are excluded when a follower bound is set.

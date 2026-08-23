@@ -155,13 +155,16 @@ export async function deleteScrapeResultStore(userId: string, scrapeJobId: strin
 
 export function attachScrapeResultSettings(job: ScrapeJob, store: ScrapeResultStore | null): ScrapeJob {
   if (!store) return { ...job, resultFilterDefinition: {}, tracksExactLeads: false, progress: null };
-  const { minFollowers, maxFollowers, location, progress } = store.filterDefinition;
+  const { minFollowers, maxFollowers, location, verifiedOnly, progress } = store.filterDefinition;
   return {
     ...job,
     resultFilterDefinition: {
       ...(minFollowers !== undefined ? { minFollowers } : {}),
       ...(maxFollowers !== undefined ? { maxFollowers } : {}),
       ...(location ? { location } : {}),
+      // Only when set: an unchecked box is the absence of a filter, not a filter that keeps
+      // everything, and the job page reads "is there a filter at all" off these keys.
+      ...(verifiedOnly ? { verifiedOnly } : {}),
     },
     tracksExactLeads: true,
     progress: progress ?? null,

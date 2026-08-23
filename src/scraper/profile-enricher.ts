@@ -220,8 +220,23 @@ async function visitProfile(page: Page, handle: string, navTimeoutMs: number): P
     waitUntil: "commit",
     timeout: navTimeoutMs,
   });
-  await checkHealth(page);
-  await page.waitForSelector('[data-testid="UserName"]', { timeout: Math.round(navTimeoutMs / 2) });
+
+  // The health check waits for the header instead of running the moment the navigation commits.
+  // X's "Something went wrong. Try reloading." boundary is routinely on screen while the SPA
+  // hydrates — which is exactly when a check placed here fired — and a `TransientPageError` fails
+  // the whole visit. The enricher treats a failed visit as best-effort, so the lead was still
+  // saved, just with nothing but its list-view data: no bio, no follower count, no location, and
+  // therefore invisible to every follower-range filter. Nothing in the run said it had gone wrong.
+  try {
+    await page.waitForSelector('[data-testid="UserName"]', { timeout: Math.round(navTimeoutMs / 2) });
+  } catch (err) {
+    // Nothing drew. *Now* the page's own text is worth reading, because whatever is on screen has
+    // had its chance: a login wall or captcha raises the account-health error the worker acts on,
+    // and anything else stays the timeout it already was.
+    await checkHealth(page);
+    throw err;
+  }
+
   // Best-effort: a suspended or restricted profile renders a name and no stats at all, and that's
   // a legitimate result rather than a failure.
   await page
@@ -230,9 +245,19 @@ async function visitProfile(page: Page, handle: string, navTimeoutMs: number): P
       { timeout: Math.round(navTimeoutMs / 6) }
     )
     .catch(() => undefined);
-  await checkHealth(page);
 
-  return extractProfileDetails(page, handle);
+  const details = await extractProfileDetails(page, handle);
+
+  // Re-checked after reading rather than before it: if X challenged us mid-visit the worker has to
+  // know, but a transient boundary that happened to be on screen next to a header we already read
+  // is no reason to throw away what we read.
+  try {
+    await checkHealth(page);
+  } catch (err) {
+    if (isAccountHealthError(err)) throw err;
+  }
+
+  return details;
 }
 
 function mergeProfileDetails(lead: RawLead, details: ProfileDetails): RawLead {

@@ -72,6 +72,10 @@ export interface ScrapeResultFilter {
   minFollowers?: number;
   maxFollowers?: number;
   location?: string;
+  // The one bound the list view already answers — X draws the same `icon-verified` badge on a
+  // UserCell that it draws on a profile — so a verified-only run can skip a candidate before
+  // spending a profile visit on it. See scrape.worker.ts#runScrape.
+  verifiedOnly?: boolean;
 }
 
 export interface Lead {

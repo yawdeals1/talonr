@@ -142,7 +142,10 @@ function candidateCapFor(data: ScrapeJobData): number {
 }
 
 function hasResultFilter(filter: ScrapeResultFilter | undefined): filter is ScrapeResultFilter {
-  return !!filter && Object.values(filter).some((value) => value !== undefined);
+  // `false` and `""` are how the form says "not set" for the non-numeric bounds, and a filter of
+  // nothing must not put the run on the filtered path — that one collects five times the candidates
+  // and saves only what matches, which is a lot of extra requests to X to enforce no bound at all.
+  return !!filter && Object.values(filter).some((value) => value !== undefined && value !== false && value !== "");
 }
 
 // Ceiling on the candidate pool regardless of cap × multiplier, matching the per-job cap the API
@@ -317,7 +320,15 @@ async function runScrape(
       throw err;
     }
 
-    sink.startChecking(rawLeads.length);
+    // Verified is the one bound that doesn't need a profile: X draws the same `icon-verified` badge
+    // on a UserCell as it does on a profile header, so the parsers already read it during
+    // collection. Dropping the rest here rather than after their visits is what keeps a
+    // "verified only" run from spending its whole clock — and its request budget against X — on
+    // profiles it was always going to discard. Follower counts and locations are only knowable from
+    // the profile, so they stay where they are: judged after the visit.
+    const candidates = data.resultFilter?.verifiedOnly ? rawLeads.filter((lead) => lead.verified) : rawLeads;
+
+    sink.startChecking(candidates.length);
 
     // Whether the *profile pass* was told to stop before it ran out of candidates — by the user's
     // "Finish now" or by the run's own clock. Deliberately not `timedOut`, which the collection
@@ -333,7 +344,7 @@ async function runScrape(
 
     let enriched: RawLead[];
     try {
-      enriched = await enrichLeadsFromProfiles(page, rawLeads, {
+      enriched = await enrichLeadsFromProfiles(page, candidates, {
         minDelayMs: env.PROFILE_DELAY_MIN_MS,
         maxDelayMs: env.PROFILE_DELAY_MAX_MS,
         rateLimitTolerance: env.RATE_LIMIT_TOLERANCE,
@@ -364,7 +375,7 @@ async function runScrape(
     // `{minFollowers: 0}` — what the form produces from a "0" in min followers — is a deliberate
     // no-op bound that every un-enriched lead passes.)
     let unenriched = 0;
-    const unvisited = enrichStoppedEarly ? rawLeads.slice(enriched.length) : [];
+    const unvisited = enrichStoppedEarly ? candidates.slice(enriched.length) : [];
     if (unvisited.length > 0) {
       try {
         unenriched = await sink.acceptRemainder(unvisited);

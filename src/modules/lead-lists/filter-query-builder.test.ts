@@ -77,3 +77,28 @@ describe("buildFilterPredicate on raw (not yet saved) leads", () => {
     expect(predicate({ bio: null, followers: 1, location: null, verified: false })).toBe(false);
   });
 });
+
+describe("buildFilterPredicate verified bound", () => {
+  const verifiedOnly = buildFilterPredicate({ verifiedOnly: true });
+
+  it("keeps verified leads and drops the rest", () => {
+    expect(verifiedOnly(lead({ verified: true }))).toBe(true);
+    expect(verifiedOnly(lead({ verified: false }))).toBe(false);
+  });
+
+  it("judges a lead whose profile was never read", () => {
+    // Unlike every other bound, this one needs nothing from the profile visit: X draws the badge
+    // on the list cell too, so the parsers set it during collection. A lead with no follower count
+    // or location — a run cut short, or one whose enrichment came back empty — can still be
+    // filtered on it, which is exactly when this filter is worth the most.
+    const collectedOnly = { bio: null, followers: null, location: null, verified: true };
+    expect(verifiedOnly(collectedOnly)).toBe(true);
+    expect(verifiedOnly({ ...collectedOnly, verified: false })).toBe(false);
+  });
+
+  it("is a no-op when it is not set", () => {
+    // The form sends the box's state, and an unchecked box must not exclude anyone.
+    expect(buildFilterPredicate({ verifiedOnly: false })(lead({ verified: false }))).toBe(true);
+    expect(buildFilterPredicate({})(lead({ verified: false }))).toBe(true);
+  });
+});

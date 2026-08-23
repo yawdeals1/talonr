@@ -20,6 +20,7 @@ const resultFilterSchema = z
     minFollowers: z.number().int().nonnegative().optional(),
     maxFollowers: z.number().int().nonnegative().optional(),
     location: z.string().trim().min(1).max(200).optional(),
+    verifiedOnly: z.boolean().optional(),
   })
   .superRefine((data, ctx) => {
     if (
