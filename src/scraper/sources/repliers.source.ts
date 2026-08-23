@@ -1,6 +1,6 @@
 import type { Page } from "playwright";
 import { extractReplyAuthors } from "../parsers/tweet-author.parser.js";
-import { X_TWEET_URL_PATTERN, type RawLead, type ScrapeSource } from "../types.js";
+import { DEFAULT_READY_TIMEOUT_MS, X_TWEET_URL_PATTERN, type RawLead, type ScrapeSource } from "../types.js";
 
 /** sourceRef is the full tweet URL, e.g. https://x.com/handle/status/1234567890. */
 export const repliersSource: ScrapeSource = {
@@ -14,8 +14,8 @@ export const repliersSource: ScrapeSource = {
     }
     return sourceRef.split(/[?#]/)[0]!.replace(/\/+$/, "").replace(/\/(likes|retweets)$/, "");
   },
-  async waitForReady(page: Page) {
-    await page.waitForSelector('article[data-testid="tweet"]', { timeout: 15000 });
+  async waitForReady(page: Page, timeoutMs = DEFAULT_READY_TIMEOUT_MS) {
+    await page.waitForSelector('article[data-testid="tweet"]', { timeout: timeoutMs });
   },
   async extractVisibleItems(page: Page): Promise<RawLead[]> {
     // The thread's first article is always the original tweet, not a reply — and the author may

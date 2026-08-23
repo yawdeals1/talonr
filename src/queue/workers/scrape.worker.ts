@@ -292,6 +292,7 @@ async function runScrape(
       maxScrollDelayMs: env.SCROLL_DELAY_MAX_MS,
       rateLimitTolerance: env.RATE_LIMIT_TOLERANCE,
       rateLimitBackoffMs: env.RATE_LIMIT_BACKOFF_MS,
+      navTimeoutMs: env.SCRAPE_NAV_TIMEOUT_MS,
       checkpoint: withRunDeadline(checkpoint, collectDeadlineAt, noteTimeout("collecting")),
       onProgress: (count: number) => sink.noteCollected(count),
     };
@@ -337,6 +338,7 @@ async function runScrape(
         maxDelayMs: env.PROFILE_DELAY_MAX_MS,
         rateLimitTolerance: env.RATE_LIMIT_TOLERANCE,
         rateLimitBackoffMs: env.RATE_LIMIT_BACKOFF_MS,
+        navTimeoutMs: env.SCRAPE_NAV_TIMEOUT_MS,
         checkpoint: enrichCheckpoint,
         onEnriched: (lead, matched) => sink.accept(lead, matched),
         // With a filter on the job, aim for capLeads *matching* leads out of the larger candidate

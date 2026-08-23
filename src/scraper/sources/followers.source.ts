@@ -1,6 +1,6 @@
 import type { Page } from "playwright";
 import { extractUserCells } from "../parsers/user-cell.parser.js";
-import { X_HANDLE_PATTERN, type RawLead, type ScrapeSource } from "../types.js";
+import { DEFAULT_READY_TIMEOUT_MS, X_HANDLE_PATTERN, type RawLead, type ScrapeSource } from "../types.js";
 
 /** sourceRef is the target account's handle (without @). */
 export const followersSource: ScrapeSource = {
@@ -11,8 +11,8 @@ export const followersSource: ScrapeSource = {
     const handle = sourceRef.replace(/^@/, "");
     return `https://x.com/${encodeURIComponent(handle)}/followers`;
   },
-  async waitForReady(page: Page) {
-    await page.waitForSelector('[data-testid="UserCell"]', { timeout: 15000 });
+  async waitForReady(page: Page, timeoutMs = DEFAULT_READY_TIMEOUT_MS) {
+    await page.waitForSelector('[data-testid="UserCell"]', { timeout: timeoutMs });
   },
   async extractVisibleItems(page: Page): Promise<RawLead[]> {
     // The target renders in the page's own header and in X's recommendation modules, but an

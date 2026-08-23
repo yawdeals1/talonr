@@ -3,6 +3,7 @@ import { logger } from "../lib/logger.js";
 import { checkHealth, watchForRateLimitResponses } from "./detectors.js";
 import {
   attachPartialLeads,
+  DEFAULT_NAV_TIMEOUT_MS,
   isAccountHealthError,
   isScrapeCancelledError,
   RateLimitedError,
@@ -57,6 +58,12 @@ export interface ProfileEnrichmentOptions {
    */
   rateLimitTolerance?: number;
   rateLimitBackoffMs?: number;
+  /**
+   * How long one profile load gets: the navigation itself, and (at a share of it) the waits for the
+   * header and the stats row. Owned by the worker (SCRAPE_NAV_TIMEOUT_MS) so this module needs no
+   * env import.
+   */
+  navTimeoutMs?: number;
 }
 
 // One extra visit for a profile whose header never rendered. X's profile header hydrates after
@@ -204,19 +211,23 @@ async function extractProfileDetails(page: Page, handle: string): Promise<Profil
  * counts do, so extracting on it produced leads with a null follower count — which every
  * follower-range filter then excludes, silently losing the lead.
  */
-async function visitProfile(page: Page, handle: string): Promise<ProfileDetails> {
+async function visitProfile(page: Page, handle: string, navTimeoutMs: number): Promise<ProfileDetails> {
+  // Waits for the response, not for DOMContentLoaded, for the same reason the list page does (see
+  // scroll-collector.ts#openListPage): X blocks DOMContentLoaded on its own bundle, so that bound
+  // failed profiles the browser would have rendered perfectly well a moment later. The header wait
+  // below is the one that decides whether this profile actually came up.
   await page.goto(`https://x.com/${encodeURIComponent(handle)}`, {
-    waitUntil: "domcontentloaded",
-    timeout: 30_000,
+    waitUntil: "commit",
+    timeout: navTimeoutMs,
   });
   await checkHealth(page);
-  await page.waitForSelector('[data-testid="UserName"]', { timeout: 15_000 });
+  await page.waitForSelector('[data-testid="UserName"]', { timeout: Math.round(navTimeoutMs / 2) });
   // Best-effort: a suspended or restricted profile renders a name and no stats at all, and that's
   // a legitimate result rather than a failure.
   await page
     .waitForSelector(
       '[data-testid="primaryColumn"] a[href$="/followers"], [data-testid="primaryColumn"] a[href$="/verified_followers"]',
-      { timeout: 10_000 }
+      { timeout: Math.round(navTimeoutMs / 6) }
     )
     .catch(() => undefined);
   await checkHealth(page);
@@ -261,6 +272,7 @@ export async function enrichLeadsFromProfiles(
   const rateLimit = watchForRateLimitResponses(page);
   const tolerance = options.rateLimitTolerance ?? DEFAULT_RATE_LIMIT_TOLERANCE;
   const backoffMs = options.rateLimitBackoffMs ?? DEFAULT_RATE_LIMIT_BACKOFF_MS;
+  const navTimeoutMs = options.navTimeoutMs ?? DEFAULT_NAV_TIMEOUT_MS;
   let throttledProfiles = 0;
 
   try {
@@ -304,7 +316,7 @@ export async function enrichLeadsFromProfiles(
 
       for (let attempt = 1; attempt <= PROFILE_ATTEMPTS; attempt += 1) {
         try {
-          result = mergeProfileDetails(lead, await visitProfile(page, lead.handle));
+          result = mergeProfileDetails(lead, await visitProfile(page, lead.handle, navTimeoutMs));
           if (result.followers !== null) break;
 
           // The header rendered without a follower count — either the profile genuinely has no

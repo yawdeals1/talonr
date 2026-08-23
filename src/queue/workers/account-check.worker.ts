@@ -1,4 +1,5 @@
 import { Worker } from "bullmq";
+import { env } from "../../config/env.js";
 import { studioGet, studioUpdate } from "../../db/studio-client.js";
 import type { XAccount } from "../../db/schema.js";
 import { logger } from "../../lib/logger.js";
@@ -29,7 +30,6 @@ import { clearAccountCooldown } from "../rate-limit/account-cooldown.js";
 /** Rendered only for a signed-in session; its absence is how a silently logged-out session shows up. */
 const SIGNED_IN_SELECTOR = '[data-testid="SideNav_AccountSwitcher_Button"], [data-testid="AppTabBar_Home_Link"]';
 
-const NAV_TIMEOUT_MS = 30_000;
 const SIGNED_IN_TIMEOUT_MS = 15_000;
 
 interface CheckOutcome {
@@ -48,7 +48,19 @@ async function runSessionCheck(account: XAccount): Promise<CheckOutcome> {
 
   try {
     const page = await session.context.newPage();
-    await page.goto("https://x.com/home", { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
+    // `commit` rather than `domcontentloaded`, matching the scraper: X blocks DOMContentLoaded on
+    // its own bundle, and a check that times out there reports an expired session for a page that
+    // was merely slow. The signed-in selector below is the real verdict either way.
+    try {
+      await page.goto("https://x.com/home", { waitUntil: "commit", timeout: env.SCRAPE_NAV_TIMEOUT_MS });
+    } catch (err) {
+      // Never reaching X says nothing about the session, so it must not be reported as an expired
+      // one — the user would reconnect an account that was fine.
+      if (err instanceof Error && err.name === "TimeoutError") {
+        return { healthy: false, reason: "X didn't respond in time, so the session couldn't be verified. Try again." };
+      }
+      throw err;
+    }
 
     // The same detector the scraper trusts: a redirect to login, a captcha frame, or X's own
     // throttling wording. Anything it raises means the session is not usable right now.

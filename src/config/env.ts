@@ -47,6 +47,14 @@ const envSchema = z.object({
   // first ends the run — the leads asked for, or this clock — and a run stopped by the clock
   // completes normally with everything it found rather than failing. See scrape.worker.ts.
   SCRAPE_MAX_RUN_MINUTES: z.coerce.number().int().min(1).max(240).default(20),
+  // How long one page load gets before the run calls it a failure — the goto that opens a list
+  // page or a profile, and (at half this) the wait for the view to actually render. Playwright's
+  // own 30s default was the whole bound before this existed, and it was one bound doing two jobs:
+  // a reply-thread scrape died with "page.goto: Timeout 30000ms exceeded" three attempts running
+  // against a tweet that loads fine in a browser, because the run was waiting for DOMContentLoaded
+  // — which X blocks on its parser-blocking bundle — rather than for the list it actually needed.
+  // Raising it costs nothing on a healthy load: the run moves on the moment the page is ready.
+  SCRAPE_NAV_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(180_000).default(60_000),
   // How a rate limit is answered. A 429 parks the account in a temporary cooldown
   // (queue/rate-limit/account-cooldown.ts) instead of checkpointing it, so jobs wait the window out
   // and resume on their own — X's throttling says nothing about whether the session is still valid,

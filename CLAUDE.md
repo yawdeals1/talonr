@@ -505,6 +505,33 @@ scrape that had collected nothing yet.
   of the list) and counts a stagnant round. Exhausting the retries throws a plain `Error` so
   BullMQ's normal attempts/backoff apply instead of a checkpoint.
 
+### Opening a page: reaching X and rendering are two different failures
+
+`openListPage` (`scroll-collector.ts`) bounds them separately, and `profile-enricher.ts#visitProfile`
+follows the same shape. The navigation waits for **`commit`** — the response headers, nothing more —
+so it can only time out when X is genuinely unreachable from the worker; the source's own
+`waitForReady` selector is what decides whether the view rendered. One bound used to do both jobs
+(`waitUntil: "domcontentloaded"` on Playwright's default 30s), and X blocks DOMContentLoaded on its
+parser-blocking bundle: an engagers scrape of a live tweet died three attempts running with
+"List page never rendered after 3 attempts: page.goto: Timeout 30000ms exceeded" without the run
+ever getting as far as looking for a tweet. Both bounds come from `SCRAPE_NAV_TIMEOUT_MS`
+(the navigation gets it whole, the render wait gets half), passed in through
+`ScrapeSourceContext.navTimeoutMs` / `ProfileEnrichmentOptions.navTimeoutMs` so the scraper modules
+stay free of env imports.
+
+- **A failed navigation is always retried** — it never got far enough to say anything about the
+  page. After it loads, only `TransientPageError` and a render timeout are; everything else throws.
+- **A render timeout re-asks `checkHealth`** before retrying (`rethrowIfChallenged`). The health
+  check at commit time runs before the SPA has drawn anything, so a login wall or captcha where the
+  list should be first surfaces as "the list never appeared" — and a challenge reported as a render
+  failure is one BullMQ retries against an account X has already stopped trusting.
+- **The run is asked between attempts** whether it still wants the page, so a cancel or the run's
+  clock lands during the retries rather than after them; `openListPage` answers `"stopped"` and the
+  collector returns what it has instead of failing.
+- The final error says which half failed — "Could not reach `<url>` … X did not respond in time"
+  vs. "List page never rendered" — because they point at different things (the worker's network or
+  proxy vs. the page itself).
+
 A run cut short still keeps its work: `scrollAndCollect` attaches whatever it collected to the
 thrown error (`attachPartialLeads`/`getPartialLeads` in `scraper/types.ts`; `engagers` passes one
 shared `into` map across both strategies so the first one's leads survive a failure in the second),
@@ -599,7 +626,10 @@ length (see "Rate limits rest an account");
 `SCRAPE_FILTER_CANDIDATE_MULTIPLIER` (1–20, default 5 — candidate profiles visited per requested
 lead when a scrape carries a result filter; see "Scraper modules"),
 `SCRAPE_MAX_RUN_MINUTES` (1–240, default 20 — wall-clock budget for one scrape run, the second of
-the two bounds that end a run; see "A run also stops on the clock"), `SCROLL_DELAY_MIN_MS`,
+the two bounds that end a run; see "A run also stops on the clock"),
+`SCRAPE_NAV_TIMEOUT_MS` (5000–180000, default 60000 — how long one page load gets: the navigation
+that opens a list page or a profile, and at half of it the wait for that view to render; see
+"Opening a page" above), `SCROLL_DELAY_MIN_MS`,
 `SCROLL_DELAY_MAX_MS`, `PROFILE_DELAY_MIN_MS`, `PROFILE_DELAY_MAX_MS`. All validated at boot by
 `src/config/env.ts` (zod) — the process throws
 immediately on an invalid/missing var rather than failing later. No `DATABASE_URL` — there is no

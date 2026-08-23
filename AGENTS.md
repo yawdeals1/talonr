@@ -331,7 +331,8 @@ scrape that had collected nothing yet.
 - **`TransientPageError`** (retryable, *not* an `isAccountHealthError`) — X's generic "Something
   went wrong. Try reloading." boundary, which fires for any one-off failed request and is routinely
   on screen while the SPA hydrates, exactly when the first `checkHealth` runs. `openListPage`
-  reloads up to 3 times on it; mid-scroll it just skips the round (reloading would reset to the top
+  reloads up to 3 times on it (and re-asks `checkHealth` after a render timeout, so a login wall
+  behind an empty list is reported as one rather than retried); mid-scroll it just skips the round (reloading would reset to the top
   of the list) and counts a stagnant round. Exhausting the retries throws a plain `Error` so
   BullMQ's normal attempts/backoff apply instead of a checkpoint.
 
@@ -421,7 +422,10 @@ avoiding a same-host NAT hairpin round trip), `SESSION_ENCRYPTION_KEY` (32 bytes
 `{DEPLORO_AUTH_BASE_URL}/api/projects/{id}/studio`), `DEPLORO_STUDIO_API_TOKEN` (a project-scoped
 Deploro PAT — `deploro token create <name> --project talonr`), `PORT`, `NODE_ENV`, `COOKIE_SECURE`,
 `ALLOWED_ORIGIN`, `WORKER_CONCURRENCY`, `DEFAULT_DAILY_SCRAPE_LIMIT`,
-`DEFAULT_MAX_CONCURRENCY_PER_ACCOUNT`, `SCRAPE_CAP_LEADS_DEFAULT`, `SCROLL_DELAY_MIN_MS`,
+`DEFAULT_MAX_CONCURRENCY_PER_ACCOUNT`, `SCRAPE_CAP_LEADS_DEFAULT`,
+`SCRAPE_NAV_TIMEOUT_MS` (how long one page load gets — the navigation, which waits for the response
+rather than for DOMContentLoaded, and at half of it the wait for the view to render),
+`SCROLL_DELAY_MIN_MS`,
 `SCROLL_DELAY_MAX_MS`, `PROFILE_DELAY_MIN_MS`, `PROFILE_DELAY_MAX_MS`. All validated at boot by
 `src/config/env.ts` (zod) — the process throws
 immediately on an invalid/missing var rather than failing later. No `DATABASE_URL` — there is no

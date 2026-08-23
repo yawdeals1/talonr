@@ -47,15 +47,33 @@ export interface ScrapeSourceContext {
    */
   rateLimitTolerance?: number;
   rateLimitBackoffMs?: number;
+  /**
+   * How long one page load gets: the `goto` that opens the list, and (at half of it) the wait for
+   * the list itself to render. Passed in rather than read from config here so the scraper modules
+   * stay free of env imports; the worker owns it (SCRAPE_NAV_TIMEOUT_MS).
+   */
+  navTimeoutMs?: number;
   /** Called after each scroll round with the number of unique handles collected so far. */
   onProgress?: (collected: number) => void;
 }
 
 export interface ScrapeSource {
   buildUrl(sourceRef: string): string;
-  waitForReady(page: Page): Promise<void>;
+  /**
+   * Waits for the view this source reads. `timeoutMs` is the caller's share of the run's page-load
+   * budget — this is the wait that decides whether a page rendered, so it can't keep a fixed
+   * bound of its own while the rest of the run's timings are configurable.
+   */
+  waitForReady(page: Page, timeoutMs?: number): Promise<void>;
   extractVisibleItems(page: Page): Promise<RawLead[]>;
 }
+
+/**
+ * Fallbacks for the two page-load bounds, used when no caller passes one (tests, and any source
+ * called outside a run). Production values come from SCRAPE_NAV_TIMEOUT_MS via the worker.
+ */
+export const DEFAULT_NAV_TIMEOUT_MS = 60_000;
+export const DEFAULT_READY_TIMEOUT_MS = 15_000;
 
 export class LoginChallengeError extends Error {
   constructor(url: string) {

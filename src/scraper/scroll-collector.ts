@@ -1,7 +1,10 @@
+import type { Page } from "playwright";
 import { checkHealth, watchForRateLimitResponses } from "./detectors.js";
 import { logger } from "../lib/logger.js";
 import {
   attachPartialLeads,
+  DEFAULT_NAV_TIMEOUT_MS,
+  isAccountHealthError,
   RateLimitedError,
   TransientPageError,
   type RawLead,
@@ -12,6 +15,9 @@ import {
 const MAX_STAGNANT_ROUNDS = 4;
 const MAX_OPEN_ATTEMPTS = 3;
 const OPEN_RETRY_DELAY_MS = 4000;
+// The wait for the list to draw itself gets half the page-load budget the navigation gets. They
+// are sequential, and the navigation is the cheap half now that it only waits for the response.
+const READY_TIMEOUT_SHARE = 0.5;
 const DEFAULT_RATE_LIMIT_TOLERANCE = 3;
 const DEFAULT_RATE_LIMIT_BACKOFF_MS = 20_000;
 // Longest a back-off sleeps before asking the checkpoint whether the run is still wanted, so a
@@ -42,42 +48,90 @@ async function backOff(ms: number, ctx: ScrapeSourceContext): Promise<void> {
 }
 
 /**
- * Loads the list page and waits for it to render, retrying X's transient error boundary.
+ * Re-reads the page's health after a render timeout, so a challenged session says so.
  *
- * The first health check runs right after `goto` at `domcontentloaded` — before the SPA has
- * hydrated, which is precisely when "Something went wrong. Try reloading." is most likely to be on
- * screen and about to clear itself. Reloading costs one request; treating it as a rate limit
- * checkpointed the account and cost a full re-login.
+ * The health check that runs when the navigation commits happens before the SPA has drawn
+ * anything, so a login wall or a captcha where the list should be shows up as "the list never
+ * appeared" rather than as the account signal it is — and a signal reported as a render failure is
+ * one BullMQ retries against an account X has already stopped trusting.
  */
-async function openListPage(source: ScrapeSource, ctx: ScrapeSourceContext): Promise<void> {
+async function rethrowIfChallenged(page: Page): Promise<void> {
+  try {
+    await checkHealth(page);
+  } catch (err) {
+    if (isAccountHealthError(err)) throw err;
+    // X's generic error boundary tells us nothing the timeout hadn't already.
+  }
+}
+
+/**
+ * Loads the list page and waits for the list itself to render, retrying what X routinely fails at.
+ *
+ * Loading and rendering are bounded separately because they fail for different reasons and only
+ * one of them is about the page. The navigation waits for `commit` — the response headers, nothing
+ * more — so it can only time out when X is genuinely unreachable from this worker; the wait for
+ * the source's own selector is what decides whether the view rendered. Waiting for
+ * `domcontentloaded` put a single bound across both, and X blocks DOMContentLoaded on its
+ * parser-blocking bundle: a reply thread that opens fine in a browser failed three attempts running
+ * with "page.goto: Timeout 30000ms exceeded", the run never getting as far as looking for a tweet.
+ *
+ * The first health check runs as soon as the navigation commits — before the SPA has hydrated,
+ * which is precisely when "Something went wrong. Try reloading." is most likely to be on screen and
+ * about to clear itself. Reloading costs one request; treating it as a rate limit checkpointed the
+ * account and cost a full re-login.
+ *
+ * Returns "stopped" if the run was told to wrap up between attempts; a cancel raises instead.
+ */
+async function openListPage(source: ScrapeSource, ctx: ScrapeSourceContext): Promise<"opened" | "stopped"> {
+  // Built once, outside the loop: a malformed sourceRef is a fact about the job rather than
+  // something a reload fixes, and it must not be reported as a page that wouldn't render.
+  const url = source.buildUrl(ctx.sourceRef);
+  const navTimeoutMs = ctx.navTimeoutMs ?? DEFAULT_NAV_TIMEOUT_MS;
+  const readyTimeoutMs = Math.round(navTimeoutMs * READY_TIMEOUT_SHARE);
   let lastError: unknown;
+  let lastStage: "load" | "render" = "load";
 
   for (let attempt = 1; attempt <= MAX_OPEN_ATTEMPTS; attempt += 1) {
+    let stage: "load" | "render" = "load";
     try {
-      await ctx.page.goto(source.buildUrl(ctx.sourceRef), { waitUntil: "domcontentloaded" });
+      await ctx.page.goto(url, { waitUntil: "commit", timeout: navTimeoutMs });
+      stage = "render";
       await checkHealth(ctx.page);
-      await source.waitForReady(ctx.page);
-      return;
+      await source.waitForReady(ctx.page, readyTimeoutMs);
+      return "opened";
     } catch (err) {
       // A hard signal (login wall, captcha, real throttle) is terminal — don't burn retries on it.
-      if (err instanceof RateLimitedError) throw err;
-      if (!(err instanceof TransientPageError) && !isWaitTimeout(err)) throw err;
+      if (isAccountHealthError(err)) throw err;
+      // Anything that goes wrong before the response arrives is worth another try whatever it says:
+      // it never got far enough to tell us something about the page. Once loaded, only X's own
+      // transient boundary and a view that didn't draw are.
+      if (stage === "render" && !(err instanceof TransientPageError) && !isWaitTimeout(err)) throw err;
+      if (stage === "render" && isWaitTimeout(err)) await rethrowIfChallenged(ctx.page);
 
       lastError = err;
+      lastStage = stage;
       logger.warn(
-        { err, attempt, sourceRef: ctx.sourceRef },
-        "list page did not render; reloading before treating it as a failure"
+        { err, attempt, stage, sourceRef: ctx.sourceRef },
+        stage === "load"
+          ? "list page did not load; retrying before treating it as a failure"
+          : "list page did not render; reloading before treating it as a failure"
       );
-      if (attempt < MAX_OPEN_ATTEMPTS) await randomDelay(OPEN_RETRY_DELAY_MS, OPEN_RETRY_DELAY_MS * 2);
+      if (attempt < MAX_OPEN_ATTEMPTS) {
+        await randomDelay(OPEN_RETRY_DELAY_MS, OPEN_RETRY_DELAY_MS * 2);
+        // Three attempts at a page X isn't serving run into minutes. The run is asked between them
+        // rather than only after the last, so a cancel — or the run's own clock — lands here too.
+        if ((await ctx.checkpoint?.()) === "finish") return "stopped";
+      }
     }
   }
 
   // Out of retries. Thrown as a plain Error, not an account-health error: the account is fine as far
   // as we know, so BullMQ's normal attempts/backoff should apply instead of a checkpoint.
+  const detail = lastError instanceof Error ? lastError.message : String(lastError);
   throw new Error(
-    `List page never rendered after ${MAX_OPEN_ATTEMPTS} attempts: ${
-      lastError instanceof Error ? lastError.message : String(lastError)
-    }`
+    lastStage === "load"
+      ? `Could not reach ${url} after ${MAX_OPEN_ATTEMPTS} attempts — X did not respond in time (check the account's proxy, if it has one): ${detail}`
+      : `List page never rendered after ${MAX_OPEN_ATTEMPTS} attempts: ${detail}`
   );
 }
 
@@ -108,7 +162,9 @@ export async function scrollAndCollect(source: ScrapeSource, ctx: ScrapeSourceCo
     // told to wrap up — by the user or by its own clock — must not spend a page load opening the
     // second list only to break out of the loop on the next line.
     if ((await ctx.checkpoint?.()) === "finish") return collected();
-    await openListPage(source, ctx);
+    // "stopped" means the run was told to wrap up while the page was still being retried — there is
+    // nothing to scroll, and nothing collected, but that is not a failure.
+    if ((await openListPage(source, ctx)) === "stopped") return collected();
 
     let stagnantRounds = 0;
 

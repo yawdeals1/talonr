@@ -1,6 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Page } from "playwright";
-import { getPartialLeads, RateLimitedError, type RawLead, type ScrapeSource } from "./types.js";
+import {
+  getPartialLeads,
+  LoginChallengeError,
+  RateLimitedError,
+  type RawLead,
+  type ScrapeSource,
+} from "./types.js";
 
 const detectors = vi.hoisted(() => ({
   checkHealth: vi.fn(async () => undefined),
@@ -149,5 +155,110 @@ describe("scrollAndCollect stop handling", () => {
 
     expect(page.goto).toHaveBeenCalledTimes(1);
     expect(leads).toHaveLength(2);
+  });
+});
+
+/** Playwright's shape for a wait that ran out — what a `goto` or a `waitForSelector` throws. */
+function timeoutError(message: string): Error {
+  const err = new Error(message);
+  err.name = "TimeoutError";
+  return err;
+}
+
+describe("scrollAndCollect page opening", () => {
+  beforeEach(() => {
+    detectors.watchForRateLimitResponses.mockReturnValue(throttlePattern([0]));
+    // The retry delay between attempts is seconds long in production; nothing here should wait it
+    // out for real.
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Runs the collector to completion with the retry delays fast-forwarded. */
+  async function runFastForwarded(source: ScrapeSource, ctx: ReturnType<typeof context>) {
+    const settled = scrollAndCollect(source, ctx).then(
+      (leads) => ({ leads, err: null as unknown }),
+      (err: unknown) => ({ leads: null, err })
+    );
+    await vi.advanceTimersByTimeAsync(120_000);
+    return settled;
+  }
+
+  it("reports a page it never reached as unreachable, not as one that wouldn't render", async () => {
+    // The failure this replaced: three identical 30s waits for DOMContentLoaded against a tweet
+    // that opens fine in a browser, reported as "List page never rendered" — which points at the
+    // wrong thing entirely, since the run never got a response to render.
+    const page = fakePage();
+    (page.goto as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
+      timeoutError("page.goto: Timeout 60000ms exceeded.")
+    );
+
+    const { err } = await runFastForwarded(countingSource(), context(page));
+
+    expect(page.goto).toHaveBeenCalledTimes(3);
+    expect((err as Error).message).toMatch(/Could not reach https:\/\/x\.com\/someone\/followers/);
+  });
+
+  it("waits for the response rather than for the whole document to parse", async () => {
+    // X blocks DOMContentLoaded on its own bundle, so that bound failed pages the browser was
+    // about to render. The source's own selector is the thing that says a list arrived.
+    const page = fakePage();
+
+    await runFastForwarded(countingSource(), context(page));
+
+    expect(page.goto).toHaveBeenCalledWith(
+      "https://x.com/someone/followers",
+      expect.objectContaining({ waitUntil: "commit" })
+    );
+  });
+
+  it("opens on a retry when the first navigation times out", async () => {
+    const page = fakePage();
+    const goto = page.goto as unknown as ReturnType<typeof vi.fn>;
+    goto.mockRejectedValueOnce(timeoutError("page.goto: Timeout 60000ms exceeded."));
+
+    const { leads } = await runFastForwarded(countingSource(), context(page));
+
+    expect(goto).toHaveBeenCalledTimes(2);
+    expect(leads).toHaveLength(4);
+  });
+
+  it("names the account signal behind a list that never appeared", async () => {
+    // The health check at commit time runs before the SPA has drawn anything, so a login wall
+    // where the list should be first shows up as a render timeout. Re-asking is what keeps it from
+    // being retried as a slow page against an account X has stopped trusting.
+    detectors.checkHealth
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new LoginChallengeError("https://x.com/i/flow/login"));
+    const source: ScrapeSource = {
+      ...countingSource(),
+      waitForReady: async () => {
+        throw timeoutError("waitForSelector: Timeout 30000ms exceeded.");
+      },
+    };
+
+    const { err } = await runFastForwarded(source, context(fakePage()));
+
+    expect(err).toBeInstanceOf(LoginChallengeError);
+  });
+
+  it("stops retrying when the run is told to wrap up between attempts", async () => {
+    // Three attempts at a page X isn't serving run into minutes — long enough that a cancel or the
+    // run's own clock must land here rather than only once the retries are spent.
+    const page = fakePage();
+    (page.goto as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
+      timeoutError("page.goto: Timeout 60000ms exceeded.")
+    );
+    const checkpoint = vi.fn(async () => "continue" as const);
+    checkpoint.mockResolvedValueOnce("continue" as const).mockResolvedValue("finish" as const);
+
+    const { leads, err } = await runFastForwarded(countingSource(), context(page, { checkpoint }));
+
+    expect(err).toBeNull();
+    expect(leads).toEqual([]);
+    expect(page.goto).toHaveBeenCalledTimes(1);
   });
 });
