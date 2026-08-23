@@ -6,7 +6,13 @@ import { logger } from "../../lib/logger.js";
 import { logActivity } from "../../modules/activity/activity.service.js";
 import { buildFilterPredicate } from "../../modules/lead-lists/filter-query-builder.js";
 import { upsertLeads } from "../../modules/leads/leads.service.js";
-import { CANCELLED_ERROR_MESSAGE, createRunCheckpoint, isCancelledJob } from "../../modules/scrapes/scrape-cancel.js";
+import {
+  CANCELLED_ERROR_MESSAGE,
+  createRunCheckpoint,
+  describeRunLimitStop,
+  isCancelledJob,
+  withRunDeadline,
+} from "../../modules/scrapes/scrape-cancel.js";
 import {
   clearScrapeFinishRequest,
   saveScrapeJobLeadIds,
@@ -143,6 +149,20 @@ function hasResultFilter(filter: ScrapeResultFilter | undefined): filter is Scra
 // accepts (scrapes.controller.ts#createSchema).
 const MAX_CANDIDATE_LEADS = 1000;
 
+/**
+ * The share of a run's wall-clock budget that reading the list may spend before it has to hand
+ * over to the profile pass.
+ *
+ * Reading the list produces nothing on its own — a lead is only saved once its profile has been
+ * read, and on a filtered run a lead with no follower count is dropped outright — so collection
+ * must never be able to spend the whole budget. On a target with no natural end (a large followers
+ * list, a reply thread thousands deep) it otherwise would: the scroll loop only stops at the
+ * candidate cap or four stagnant rounds, and neither arrives. Half leaves the profile pass, which
+ * is the slower half per lead, a real share of the clock. Collection that ends sooner hands its
+ * unused time straight to enrichment, which runs against the whole-run deadline.
+ */
+const COLLECT_BUDGET_SHARE = 0.5;
+
 /** How often a running job republishes its counters. */
 const PROGRESS_REPORT_INTERVAL_MS = 3_000;
 
@@ -221,7 +241,15 @@ function createLeadSink(data: ScrapeJobData) {
 
 type LeadSink = ReturnType<typeof createLeadSink>;
 
-async function runScrape(data: ScrapeJobData, sink: LeadSink): Promise<{ leadsFound: number }> {
+/**
+ * Runs one scrape end to end and returns what it saved, plus what the run's clock cost it — a job
+ * that stopped on time rather than on the leads it was asked for needs to say so, and so does one
+ * whose profile pass didn't reach everything it had collected.
+ */
+async function runScrape(
+  data: ScrapeJobData,
+  sink: LeadSink
+): Promise<{ leadsFound: number; timedOut: boolean; unenriched: number }> {
   const account = await studioGet<XAccount>("x_accounts", data.xAccountId);
   if (!account) throw new Error(`X account ${data.xAccountId} not found`);
   if (!account.encryptedSession) {
@@ -237,6 +265,24 @@ async function runScrape(data: ScrapeJobData, sink: LeadSink): Promise<{ leadsFo
   try {
     const page = await session.context.newPage();
     const candidateCap = candidateCapFor(data);
+
+    // Two bounds on this run, whichever lands first: the leads the user asked for (capLeads, held
+    // by the scroll cap and the enricher's match target), and this clock. Without the clock a run
+    // against a target that never runs out only ends when it has collected its full candidate
+    // pool — which on a busy reply thread is hours of scrolling, and is what left a 20-lead scrape
+    // stuck on "Reading the list…" long past the point it was any use.
+    const startedAt = Date.now();
+    const runDeadlineAt = startedAt + env.SCRAPE_MAX_RUN_MINUTES * 60_000;
+    const collectDeadlineAt = startedAt + env.SCRAPE_MAX_RUN_MINUTES * 60_000 * COLLECT_BUDGET_SHARE;
+    let timedOut = false;
+    const noteTimeout = (phase: "collecting" | "checking") => () => {
+      timedOut = true;
+      logger.info(
+        { scrapeJobId: data.scrapeJobId, phase, budgetMinutes: env.SCRAPE_MAX_RUN_MINUTES },
+        "scrape hit its run-time budget; wrapping up with what it has"
+      );
+    };
+
     const checkpoint = createRunCheckpoint(data.userId, data.scrapeJobId);
     const collectOpts = {
       page,
@@ -246,7 +292,7 @@ async function runScrape(data: ScrapeJobData, sink: LeadSink): Promise<{ leadsFo
       maxScrollDelayMs: env.SCROLL_DELAY_MAX_MS,
       rateLimitTolerance: env.RATE_LIMIT_TOLERANCE,
       rateLimitBackoffMs: env.RATE_LIMIT_BACKOFF_MS,
-      checkpoint,
+      checkpoint: withRunDeadline(checkpoint, collectDeadlineAt, noteTimeout("collecting")),
       onProgress: (count: number) => sink.noteCollected(count),
     };
 
@@ -272,13 +318,26 @@ async function runScrape(data: ScrapeJobData, sink: LeadSink): Promise<{ leadsFo
 
     sink.startChecking(rawLeads.length);
 
+    // Whether the *profile pass* was told to stop before it ran out of candidates — by the user's
+    // "Finish now" or by the run's own clock. Deliberately not `timedOut`, which the collection
+    // phase can set on its own: what to do with the leads enrichment never reached depends only on
+    // why enrichment ended, and hitting the match target is not a reason to keep them.
+    let enrichStoppedEarly = false;
+    const enrichDeadline = withRunDeadline(checkpoint, runDeadlineAt, noteTimeout("checking"));
+    const enrichCheckpoint = async () => {
+      const verdict = await enrichDeadline();
+      if (verdict === "finish") enrichStoppedEarly = true;
+      return verdict;
+    };
+
+    let enriched: RawLead[];
     try {
-      await enrichLeadsFromProfiles(page, rawLeads, {
+      enriched = await enrichLeadsFromProfiles(page, rawLeads, {
         minDelayMs: env.PROFILE_DELAY_MIN_MS,
         maxDelayMs: env.PROFILE_DELAY_MAX_MS,
         rateLimitTolerance: env.RATE_LIMIT_TOLERANCE,
         rateLimitBackoffMs: env.RATE_LIMIT_BACKOFF_MS,
-        checkpoint,
+        checkpoint: enrichCheckpoint,
         onEnriched: (lead, matched) => sink.accept(lead, matched),
         // With a filter on the job, aim for capLeads *matching* leads out of the larger candidate
         // pool collected above; the enricher stops as soon as it has them.
@@ -293,7 +352,29 @@ async function runScrape(data: ScrapeJobData, sink: LeadSink): Promise<{ leadsFo
       throw err;
     }
 
-    return { leadsFound: sink.saved };
+    // The enricher stops early for three reasons, and only two of them mean "keep the rest".
+    // Stopped by the user or the clock, the leads it never reached were collected and would
+    // otherwise be thrown away, so they go to the sink with their list-view data. Stopped because
+    // it *found what it was asked for*, the leads it never reached are the candidates it
+    // deliberately didn't need — saving those would put the whole unfiltered candidate pool into
+    // the results of a run whose entire point was to narrow it, which is what the filter exists to
+    // prevent. (`acceptRemainder`'s keep rule is not a sufficient guard on its own: a filter of
+    // `{minFollowers: 0}` — what the form produces from a "0" in min followers — is a deliberate
+    // no-op bound that every un-enriched lead passes.)
+    let unenriched = 0;
+    const unvisited = enrichStoppedEarly ? rawLeads.slice(enriched.length) : [];
+    if (unvisited.length > 0) {
+      try {
+        unenriched = await sink.acceptRemainder(unvisited);
+      } catch (err) {
+        logger.warn(
+          { err, scrapeJobId: data.scrapeJobId, unvisited: unvisited.length },
+          "could not save the leads collected but not reached before the run stopped"
+        );
+      }
+    }
+
+    return { leadsFound: sink.saved, timedOut, unenriched };
   } finally {
     await closeScrapeSession(session);
   }
@@ -355,14 +436,29 @@ export function startScrapeWorker(): Worker<ScrapeJobData> {
         }
 
         await markJobStatus(scrapeJobId, "running", undefined, { startedAt: new Date() });
-        const { leadsFound } = await runScrape(job.data, sink);
-        await markJobStatus(scrapeJobId, "completed", undefined, { finishedAt: new Date(), leadsFound });
+        const { leadsFound, timedOut, unenriched } = await runScrape(job.data, sink);
+        // A run that ran out of clock still completed — it stopped looking and kept everything it
+        // found — but it did not do what was asked, so the job carries a note saying so. Without
+        // one, "20 requested, 6 found" is indistinguishable from a target that only had 6 matching
+        // accounts in it, and a full-looking count of leads with no profile details behind it
+        // looks like a clean success.
+        const shortfallNote = timedOut
+          ? (describeRunLimitStop({
+              budgetMinutes: env.SCRAPE_MAX_RUN_MINUTES,
+              leadsFound,
+              capLeads: job.data.capLeads,
+              unenriched,
+            }) ?? undefined)
+          : undefined;
+        await markJobStatus(scrapeJobId, "completed", shortfallNote, { finishedAt: new Date(), leadsFound });
         await touchAccountLastUsed(xAccountId);
         await logActivity(job.data.userId, "scrape.completed", {
           scrapeJobId,
           xAccountId,
           sourceType: job.data.sourceType,
           leadsFound,
+          timedOut,
+          unenriched,
         });
       } catch (err) {
         if (isScrapeCancelledError(err)) {

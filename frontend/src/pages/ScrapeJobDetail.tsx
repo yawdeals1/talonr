@@ -235,6 +235,15 @@ export function ScrapeJobDetail() {
         </div>
       )}
 
+      {/* A completed job carrying a message stopped short of what it was asked for — it ran out of
+          its time budget rather than out of accounts. That is not a failure, so it reads as a note
+          rather than an error. */}
+      {job.status === "completed" && job.errorMessage && (
+        <div className="rounded-md border border-status-warning-bg bg-status-warning-bg p-3 text-sm text-status-warning">
+          {job.errorMessage}
+        </div>
+      )}
+
       <ScrapeProgressPanel job={job} />
 
       <dl className="grid grid-cols-2 gap-4 rounded-lg border p-4 text-sm sm:grid-cols-4">

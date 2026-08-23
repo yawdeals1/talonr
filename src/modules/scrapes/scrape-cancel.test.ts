@@ -6,7 +6,8 @@ vi.mock("../../db/studio-client.js", () => studio);
 const results = vi.hoisted(() => ({ isScrapeFinishRequested: vi.fn() }));
 vi.mock("./scrape-results.service.js", () => results);
 
-const { CANCELLED_ERROR_MESSAGE, createRunCheckpoint, isCancelledJob } = await import("./scrape-cancel.js");
+const { CANCELLED_ERROR_MESSAGE, createRunCheckpoint, describeRunLimitStop, isCancelledJob, withRunDeadline } =
+  await import("./scrape-cancel.js");
 const { ScrapeCancelledError } = await import("../../scraper/types.js");
 
 const runningJob = { status: "running", errorMessage: null } as const;
@@ -85,5 +86,80 @@ describe("createRunCheckpoint", () => {
     // A Studio hiccup must not kill a healthy scrape — the next checkpoint tries again.
     studio.studioGet.mockRejectedValue(new Error("studio unavailable"));
     await expect(checkpointFor()()).resolves.toBe("continue");
+  });
+});
+
+describe("withRunDeadline", () => {
+  const never = () => Promise.resolve("continue" as const);
+
+  it("lets a run carry on while it still has time", async () => {
+    const checkpoint = withRunDeadline(never, Date.now() + 60_000);
+    await expect(checkpoint()).resolves.toBe("continue");
+  });
+
+  it("asks the run to wrap up once the clock runs out", async () => {
+    const checkpoint = withRunDeadline(never, Date.now() - 1);
+    await expect(checkpoint()).resolves.toBe("finish");
+  });
+
+  it("reports the expiry exactly once, however often it is asked", async () => {
+    const onExpire = vi.fn();
+    const checkpoint = withRunDeadline(never, Date.now() - 1, onExpire);
+
+    await checkpoint();
+    await checkpoint();
+    await checkpoint();
+
+    expect(onExpire).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets a cancellation through instead of swallowing it as a timeout", async () => {
+    // The user stopped this run; it must be recorded as cancelled even though the clock had also
+    // run out, so the wrapped checkpoint is asked before the deadline is consulted.
+    const onExpire = vi.fn();
+    const cancelling = () => Promise.reject(new ScrapeCancelledError());
+    const checkpoint = withRunDeadline(cancelling, Date.now() - 1, onExpire);
+
+    await expect(checkpoint()).rejects.toBeInstanceOf(ScrapeCancelledError);
+    expect(onExpire).not.toHaveBeenCalled();
+  });
+
+  it("does not claim a timeout when the user asked the run to finish", async () => {
+    const onExpire = vi.fn();
+    const finishing = () => Promise.resolve("finish" as const);
+    const checkpoint = withRunDeadline(finishing, Date.now() - 1, onExpire);
+
+    await expect(checkpoint()).resolves.toBe("finish");
+    expect(onExpire).not.toHaveBeenCalled();
+  });
+});
+
+describe("describeRunLimitStop", () => {
+  const base = { budgetMinutes: 20, leadsFound: 20, capLeads: 20, unenriched: 0 };
+
+  it("says nothing when the clock cost the run nothing", () => {
+    expect(describeRunLimitStop(base)).toBeNull();
+  });
+
+  it("reports a run that ran out of time before it hit the cap", () => {
+    const note = describeRunLimitStop({ ...base, leadsFound: 6 });
+    expect(note).toContain("6 of the 20 leads requested");
+    expect(note).toContain("20-minute run limit");
+  });
+
+  it("reports leads saved without profile details even when the count looks complete", () => {
+    // The case the saved count hides: an unfiltered run keeps everything it collected, so a clock
+    // that beat the profile pass still reports a full cap — while most of those rows have no
+    // follower count and are invisible to every follower-range filter.
+    const note = describeRunLimitStop({ ...base, leadsFound: 1000, capLeads: 1000, unenriched: 850 });
+    expect(note).not.toBeNull();
+    expect(note).toContain("850 of them");
+    expect(note).toContain("no follower count or location");
+  });
+
+  it("does not read as though one lead were several", () => {
+    expect(describeRunLimitStop({ ...base, leadsFound: 1, capLeads: 1, unenriched: 1 })).toContain(
+      "1 lead saved, 1 of it"
+    );
   });
 });

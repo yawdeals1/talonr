@@ -103,7 +103,11 @@ export async function scrollAndCollect(source: ScrapeSource, ctx: ScrapeSourceCo
   let throttledRounds = 0;
 
   try {
-    await ctx.checkpoint?.();
+    // Asked before the page is even opened, and its verdict honoured: an "engagers" job runs two
+    // strategies through this function in sequence off one shared checkpoint, so a run already
+    // told to wrap up — by the user or by its own clock — must not spend a page load opening the
+    // second list only to break out of the loop on the next line.
+    if ((await ctx.checkpoint?.()) === "finish") return collected();
     await openListPage(source, ctx);
 
     let stagnantRounds = 0;

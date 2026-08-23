@@ -120,3 +120,34 @@ describe("scrollAndCollect rate-limit handling", () => {
     expect(checkpoint.mock.calls.length).toBeGreaterThan(3);
   });
 });
+
+describe("scrollAndCollect stop handling", () => {
+  beforeEach(() => {
+    detectors.watchForRateLimitResponses.mockReturnValue(throttlePattern([0]));
+  });
+
+  it("does not even open the list page when the run has already been told to wrap up", async () => {
+    // An "engagers" job runs two strategies through this function off one shared checkpoint, and a
+    // run stopped by its own clock during the first must not spend a page load opening the second.
+    const page = fakePage();
+    const checkpoint = vi.fn(async () => "finish" as const);
+
+    const leads = await scrollAndCollect(countingSource(), context(page, { checkpoint }));
+
+    expect(leads).toEqual([]);
+    expect(page.goto).not.toHaveBeenCalled();
+  });
+
+  it("keeps the leads collected before the run was told to wrap up", async () => {
+    const page = fakePage();
+    // Opens the page and runs one round, then wraps up: "finish" ends the search, it doesn't
+    // discard what the search already found.
+    let calls = 0;
+    const checkpoint = vi.fn(async () => (calls++ < 2 ? ("continue" as const) : ("finish" as const)));
+
+    const leads = await scrollAndCollect(countingSource(), context(page, { capLeads: 100, checkpoint }));
+
+    expect(page.goto).toHaveBeenCalledTimes(1);
+    expect(leads).toHaveLength(2);
+  });
+});

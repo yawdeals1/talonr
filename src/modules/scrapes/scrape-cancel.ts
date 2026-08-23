@@ -85,3 +85,77 @@ export function createRunCheckpoint(userId: string, scrapeJobId: string): () => 
     return verdict;
   };
 }
+
+/**
+ * Wraps a run checkpoint with a wall-clock deadline, so a run stops on the clock as well as on the
+ * user's word.
+ *
+ * A scrape's only other bound is the lead cap, and on a target big enough that bound never
+ * arrives: X keeps serving more followers/replies, so a run that has to check several candidates
+ * per lead it keeps will scroll and visit profiles indefinitely. The deadline is answered as
+ * `"finish"` — the same verdict "Finish now" produces — because running out of time is not a
+ * failure: the run stops looking, keeps everything it found, and the job completes normally.
+ *
+ * The wrapped checkpoint is asked first so a cancel still wins: a user who stopped the run should
+ * see it recorded as cancelled, not as a run that happened to time out at the same moment.
+ * `onExpire` fires once, the first time the clock is what stopped the run, so the caller can say
+ * so on the finished job.
+ */
+export function withRunDeadline(
+  checkpoint: () => Promise<RunVerdict>,
+  deadlineAt: number,
+  onExpire?: () => void
+): () => Promise<RunVerdict> {
+  let expired = false;
+
+  return async () => {
+    const verdict = await checkpoint();
+    if (verdict === "finish") return "finish";
+    if (Date.now() < deadlineAt) return "continue";
+
+    if (!expired) {
+      expired = true;
+      onExpire?.();
+    }
+    return "finish";
+  };
+}
+
+/**
+ * How a run stopped by its wall-clock budget is described on the finished job, or `null` when the
+ * clock cost it nothing worth saying.
+ *
+ * Two different disappointments hide behind "completed", and the saved count alone tells neither:
+ *
+ * - it saved fewer leads than were asked for, because the clock beat the cap; and
+ * - it saved leads it never read a profile for, because the clock beat the *profile pass*. Those
+ *   carry only what the list view showed — no follower count, no location — so every
+ *   follower-range and location filter skips them. An unfiltered run hits this and still reports
+ *   a full `capLeads`, which reads as a clean success while most of the rows are unusable, so the
+ *   saved count is exactly the wrong thing to gate this on.
+ */
+export function describeRunLimitStop(input: {
+  budgetMinutes: number;
+  leadsFound: number;
+  capLeads: number;
+  /** Leads saved straight off the list, whose profiles the run never reached. */
+  unenriched: number;
+}): string | null {
+  const { budgetMinutes, leadsFound, capLeads, unenriched } = input;
+  const limit = `Stopped at the ${budgetMinutes}-minute run limit`;
+
+  if (unenriched > 0) {
+    const them = unenriched === 1 ? "it" : "them";
+    return (
+      `${limit}. ${leadsFound} lead${leadsFound === 1 ? "" : "s"} saved, ${unenriched} of ${them} ` +
+      "straight off the list with no profile details — those have no follower count or location, " +
+      "so follower and location filters skip them until another scrape fills them in."
+    );
+  }
+
+  if (leadsFound < capLeads) {
+    return `${limit} with ${leadsFound} of the ${capLeads} leads requested. Run it again to collect more.`;
+  }
+
+  return null;
+}

@@ -352,6 +352,58 @@ Two different things a user can ask of a run in flight, both answered at the sam
   progress — a flag written into it by the API would be clobbered. The API only creates that row;
   the worker only reads it, and deletes it when the run ends.
 
+### A run also stops on the clock (`SCRAPE_MAX_RUN_MINUTES`)
+
+**A run ends on whichever bound lands first: the leads it was asked for, or its wall-clock
+budget.** The lead cap was the only bound a run had, and on a big enough target that bound never
+arrives — X keeps serving more followers/replies, and a filtered run has to read several
+candidates per lead it keeps — so a 20-lead scrape of a busy reply thread sat on "Reading the
+list…" for hours and only ever stopped because someone cancelled it. `SCRAPE_MAX_RUN_MINUTES`
+(default 20) is that second bound, counted from the moment the browser opens.
+
+A scrape therefore always has both bounds, never just the clock: `capLeads` is optional on
+`POST /scrapes` and falls back to `SCRAPE_CAP_LEADS_DEFAULT` (100) in `scrapes.service.ts`, so a
+request that forgets one still runs against a modest cap rather than whatever the clock allows.
+The number is deliberately *not* mirrored in the frontend: the browser can't read
+`SCRAPE_CAP_LEADS_DEFAULT`, so the trigger form's cap field says "System default" rather than a
+figure that would go stale on any deploy that overrides it.
+
+- It is enforced through the *same* checkpoints as cancel/finish (`withRunDeadline` in
+  `scrape-cancel.ts` wraps `createRunCheckpoint`), so it lands at a scroll round or a profile
+  visit — within roughly ten seconds, and inside a rate-limit back-off's slices too. Nothing in
+  `scroll-collector.ts`/`profile-enricher.ts` knows about the clock.
+- It answers as **`"finish"`**, the same verdict "Finish now" produces: running out of time is not
+  a failure, so the run stops looking, keeps everything it found, and the job **completes**. The
+  wrapped checkpoint is asked *first*, so a cancel that lands at the same moment still records as
+  cancelled rather than as a timeout.
+- **Reading the list may spend at most half the budget** (`COLLECT_BUDGET_SHARE` in
+  `scrape.worker.ts`). Collection produces nothing on its own — a lead is only saved once its
+  profile has been read, and on a filtered run a lead with no follower count is dropped outright —
+  so letting it spend the whole clock would end a 20-minute run with zero saved leads. Collection
+  that finishes sooner hands its unused time to enrichment, which runs against the whole-run
+  deadline.
+- **Leads collected but never reached are saved when the run was *stopped*, and only then.** The
+  enricher visits candidates in order and returns only those it reached, so the worker hands
+  `rawLeads.slice(enriched.length)` to the same sink (`acceptRemainder`). This is gated on the
+  enrichment checkpoint having answered `"finish"` — the user or the clock — **not** on the
+  enricher having returned fewer leads than it was given, because it also returns early on the
+  happy path: a filtered run stops the moment it has its `capLeads` matches, and the candidates it
+  skipped are exactly the ones it deliberately didn't need. Dumping those would put the whole
+  unfiltered candidate pool into the results of a run whose point was to narrow it.
+  `acceptRemainder`'s keep rule is not a sufficient guard on its own — a filter of
+  `{minFollowers: 0}`, which the form produces from a "0" in min followers, is a deliberate no-op
+  bound (see `buildFilterPredicate`) that every un-enriched lead passes. Gating it correctly also
+  fixed "Finish now" mid-enrichment silently throwing away the rest of the collected list.
+- A run the clock cut short records a note on the **completed** job (`errorMessage`, rendered as a
+  note rather than an error in `ScrapeJobDetail.tsx`), built by
+  `scrape-cancel.ts#describeRunLimitStop`. It covers two disappointments the saved count hides:
+  fewer leads than asked for, *and* leads saved with no profile details behind them. The second is
+  why the note can't be gated on `leadsFound < capLeads` — an unfiltered run keeps everything it
+  collected, so a clock that beat the profile pass still reports a full `capLeads` while most of
+  those rows have no follower count and are invisible to every follower-range filter.
+  `isCancelledJob` still only matches `failed` + the exact cancel message, so the two encodings
+  don't collide.
+
 ### Cancelling a run
 
 `POST /scrapes/:id/cancel` works on a **queued or running** job. A queued one is pulled out of the
@@ -490,7 +542,7 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 | PATCH | /accounts/:id | auth | Update dailyScrapeLimit / maxConcurrency / status (cannot reactivate a checkpointed/banned account — see below) |
 | POST | /accounts/:id/revalidate | auth | Queue a live check of a **checkpointed** account's stored session against X; reactivates it only if X answers with a signed-in session, otherwise leaves it alone and says why. The alternative to re-running the login script |
 | DELETE | /accounts/:id | auth | Delete own account (cascades scrape_jobs) |
-| POST | /scrapes | auth | Create a scrape_jobs row + enqueue BullMQ job (`xAccountId`, `sourceType`: `search`\|`followers`\|`engagers`, `sourceRef`, `engagementTypes?` required for `engagers`, `capLeads?`, `resultFilterDefinition?` — a follower/location filter that both steers the run toward `capLeads` matching leads and becomes the job's saved results view) — rate-limited per user |
+| POST | /scrapes | auth | Create a scrape_jobs row + enqueue BullMQ job (`xAccountId`, `sourceType`: `search`\|`followers`\|`engagers`, `sourceRef`, `engagementTypes?` required for `engagers`, `capLeads?` — defaults to `SCRAPE_CAP_LEADS_DEFAULT` (100), `resultFilterDefinition?` — a follower/location filter that both steers the run toward `capLeads` matching leads and becomes the job's saved results view) — rate-limited per user |
 | GET | /scrapes | auth | List own jobs, filterable by `status`/`xAccountId` |
 | GET | /scrapes/:id | auth | Job detail/status |
 | POST | /scrapes/:id/finish | auth | Ask a **running** scrape to stop looking and complete with what it has already found (not a cancel — the job ends as `completed`) |
@@ -537,14 +589,17 @@ avoiding a same-host NAT hairpin round trip), `SESSION_ENCRYPTION_KEY` (32 bytes
 `{DEPLORO_AUTH_BASE_URL}/api/projects/{id}/studio`), `DEPLORO_STUDIO_API_TOKEN` (a project-scoped
 Deploro PAT — `deploro token create <name> --project talonr`), `PORT`, `NODE_ENV`, `COOKIE_SECURE`,
 `ALLOWED_ORIGIN`, `WORKER_CONCURRENCY`, `DEFAULT_DAILY_SCRAPE_LIMIT`,
-`DEFAULT_MAX_CONCURRENCY_PER_ACCOUNT`, `SCRAPE_CAP_LEADS_DEFAULT`,
+`DEFAULT_MAX_CONCURRENCY_PER_ACCOUNT`, `SCRAPE_CAP_LEADS_DEFAULT` (max 1000, default 100 — the
+cap a scrape runs with when the request omits `capLeads`; see "A run also stops on the clock"),
 `RATE_LIMIT_COOLDOWN_MINUTES` (default 15) / `RATE_LIMIT_COOLDOWN_MAX_MINUTES` (default 120) — how
 long a 429 rests an account, and the ceiling repeat throttles escalate to;
 `RATE_LIMIT_TOLERANCE` (1–10, default 3) / `RATE_LIMIT_BACKOFF_MS` (default 20000) — consecutive
 throttled rounds a run backs off through before resting the account, and the first back-off's
 length (see "Rate limits rest an account");
 `SCRAPE_FILTER_CANDIDATE_MULTIPLIER` (1–20, default 5 — candidate profiles visited per requested
-lead when a scrape carries a result filter; see "Scraper modules"), `SCROLL_DELAY_MIN_MS`,
+lead when a scrape carries a result filter; see "Scraper modules"),
+`SCRAPE_MAX_RUN_MINUTES` (1–240, default 20 — wall-clock budget for one scrape run, the second of
+the two bounds that end a run; see "A run also stops on the clock"), `SCROLL_DELAY_MIN_MS`,
 `SCROLL_DELAY_MAX_MS`, `PROFILE_DELAY_MIN_MS`, `PROFILE_DELAY_MAX_MS`. All validated at boot by
 `src/config/env.ts` (zod) — the process throws
 immediately on an invalid/missing var rather than failing later. No `DATABASE_URL` — there is no

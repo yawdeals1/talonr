@@ -29,12 +29,24 @@ const envSchema = z.object({
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(5),
   DEFAULT_DAILY_SCRAPE_LIMIT: z.coerce.number().int().positive().default(150),
   DEFAULT_MAX_CONCURRENCY_PER_ACCOUNT: z.coerce.number().int().positive().default(1),
-  SCRAPE_CAP_LEADS_DEFAULT: z.coerce.number().int().positive().default(150),
+  // The cap a scrape runs with when the user doesn't set one. A scrape has to have a lead cap:
+  // it and SCRAPE_MAX_RUN_MINUTES are the two bounds that end a run, and a target like a large
+  // followers list or a busy reply thread has no natural end of its own. 100 is deliberately
+  // modest — a forgotten cap should cost a short run against X, not the longest one the clock
+  // allows; anyone who wants more sets it per scrape (up to 1000).
+  SCRAPE_CAP_LEADS_DEFAULT: z.coerce.number().int().positive().max(1000).default(100),
   // How many candidate profiles a scrape carrying a follower/location filter may visit per lead it
   // was asked for, so it can keep looking until it has that many *matching* leads instead of
   // filtering the first N accounts in the list down to a handful. Raising it finds more matches in
   // one run at the cost of proportionally more requests to X — see scrape.worker.ts#candidateCapFor.
   SCRAPE_FILTER_CANDIDATE_MULTIPLIER: z.coerce.number().int().min(1).max(20).default(5),
+  // Wall-clock budget for a single scrape run, measured from the moment the browser opens.
+  // The lead cap is the only other bound a run has, and on a big target that bound never arrives:
+  // a busy reply thread or a large followers list keeps serving more accounts, so "collect 20
+  // matching leads" can mean scrolling and visiting profiles for hours. Whichever bound lands
+  // first ends the run — the leads asked for, or this clock — and a run stopped by the clock
+  // completes normally with everything it found rather than failing. See scrape.worker.ts.
+  SCRAPE_MAX_RUN_MINUTES: z.coerce.number().int().min(1).max(240).default(20),
   // How a rate limit is answered. A 429 parks the account in a temporary cooldown
   // (queue/rate-limit/account-cooldown.ts) instead of checkpointing it, so jobs wait the window out
   // and resume on their own — X's throttling says nothing about whether the session is still valid,
