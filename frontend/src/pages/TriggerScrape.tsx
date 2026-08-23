@@ -257,7 +257,8 @@ export function TriggerScrape() {
           </legend>
           <p className="text-xs text-zinc-500">
             Set these and the scrape keeps checking profiles until it has a full lead cap of accounts that match,
-            instead of stopping at the first accounts in the list. Every profile it checks is still saved.
+            instead of stopping at the first accounts in the list. Only the accounts that match get saved —
+            leave these empty to keep every profile the scrape reads.
           </p>
 
           <div className="grid grid-cols-2 gap-3">
