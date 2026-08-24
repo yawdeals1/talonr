@@ -25,7 +25,6 @@ interface FollowerRangeFilters {
   maxFollowers?: number;
   location?: string;
 }
-
 export function LeadsBrowser() {
   const queryClient = useQueryClient();
   const [handle, setHandle] = useState("");
@@ -173,54 +172,111 @@ export function LeadsBrowser() {
     if (listName.trim()) createListMutation.mutate();
   }
 
-  return (
-    <div className="space-y-4">
-      <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Leads</h1>
+  function exportLeadsToCsv(leadsToExport: Lead[]) {
+    const headers = ["Handle", "Name", "Bio", "Followers", "Location", "Verified", "SourceType", "SourceRef", "LastSeenAt"];
+    const rows = leadsToExport.map((l) => [
+      `"${l.handle}"`,
+      `"${(l.displayName || "").replace(/"/g, '""')}"`,
+      `"${(l.bio || "").replace(/"/g, '""')}"`,
+      l.followers ?? "",
+      `"${(l.location || "").replace(/"/g, '""')}"`,
+      l.verified ? "true" : "false",
+      l.sourceType,
+      `"${(l.sourceRef || "").replace(/"/g, '""')}"`,
+      l.lastSeenAt,
+    ]);
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `talonr_leads_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
 
-      <div className="flex flex-wrap gap-3">
-        <input
-          value={handle}
-          onChange={(e) => {
-            setHandle(e.target.value);
-            setPage(1);
-          }}
-          placeholder="Search by handle…"
-          className="w-64 rounded-md border bg-transparent px-3 py-1.5 text-sm outline-none focus:border-accent"
-        />
+  return (
+    <div className="space-y-6">
+      {/* Header Bar */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+            Leads Database
+          </h1>
+          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+            Search, filter, export, and triage scraped X profiles across all jobs.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={leads.length === 0}
+            onClick={() => exportLeadsToCsv(leads)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 py-1.5 font-mono text-xs font-semibold text-zinc-700 shadow-xs hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+            <span>Export Page CSV</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Quick Search & Source Filter Bar */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[240px]">
+          <svg className="absolute left-3 top-2.5 h-4 w-4 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+          </svg>
+          <input
+            value={handle}
+            onChange={(e) => {
+              setHandle(e.target.value);
+              setPage(1);
+            }}
+            placeholder="Search by handle (e.g. founder)…"
+            className="w-full rounded-md border bg-white pl-9 pr-3 py-2 font-mono text-xs text-zinc-900 outline-none focus:border-amber-600 dark:bg-zinc-950 dark:text-zinc-100 dark:border-zinc-800"
+          />
+        </div>
         <select
           value={sourceType}
           onChange={(e) => {
             setSourceType(e.target.value as SourceType | "");
             setPage(1);
           }}
-          className="rounded-md border bg-transparent px-3 py-1.5 text-sm text-zinc-900 outline-none focus:border-accent dark:text-zinc-100"
+          className="rounded-md border bg-white px-3 py-2 font-mono text-xs text-zinc-900 outline-none focus:border-amber-600 dark:bg-zinc-950 dark:text-zinc-100 dark:border-zinc-800"
         >
           <option value="" className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
-            All sources
+            All Sources
           </option>
           {SOURCE_TYPES.map((s) => (
             <option key={s} value={s} className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
-              {s}
+              {s.toUpperCase()}
             </option>
           ))}
         </select>
       </div>
 
-      <form onSubmit={applyRangeFilters} className="rounded-lg border p-4">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Follower range and location</h2>
-            <p className="text-xs text-zinc-500">
-              Leads with no follower count on file are excluded once a follower bound is set.
-            </p>
+      {/* Filter Parameters Form */}
+      <form onSubmit={applyRangeFilters} className="rounded-lg border bg-zinc-50/50 p-4 space-y-3 dark:bg-zinc-900/40 dark:border-zinc-800">
+        <div className="flex items-center justify-between border-b pb-2 dark:border-zinc-800">
+          <div className="flex items-center gap-2">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
+              Profile Criteria Filters
+            </h2>
+            {Object.keys(appliedRange).length > 0 && (
+              <span className="rounded bg-amber-500/10 px-2 py-0.5 font-mono text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                ACTIVE
+              </span>
+            )}
           </div>
           {Object.keys(appliedRange).length > 0 && (
             <button
               type="button"
               onClick={clearRangeFilters}
-              className="shrink-0 text-xs font-medium text-accent-text hover:underline"
+              className="font-mono text-xs font-semibold text-amber-700 hover:underline dark:text-amber-400"
             >
-              Clear
+              Reset Filters
             </button>
           )}
         </div>
@@ -231,7 +287,7 @@ export function LeadsBrowser() {
               htmlFor={`${idPrefix}-min-followers`}
               className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400"
             >
-              Min followers
+              Min Followers
             </label>
             <input
               id={`${idPrefix}-min-followers`}
@@ -240,8 +296,8 @@ export function LeadsBrowser() {
               step={1}
               value={minFollowers}
               onChange={(event) => setMinFollowers(event.target.value)}
-              placeholder="No minimum"
-              className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+              placeholder="0"
+              className="w-full rounded-md border bg-white px-3 py-1.5 font-mono text-xs outline-none focus:border-amber-600 dark:bg-zinc-950 dark:border-zinc-800"
             />
           </div>
           <div>
@@ -249,7 +305,7 @@ export function LeadsBrowser() {
               htmlFor={`${idPrefix}-max-followers`}
               className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400"
             >
-              Max followers
+              Max Followers
             </label>
             <input
               id={`${idPrefix}-max-followers`}
@@ -259,7 +315,7 @@ export function LeadsBrowser() {
               value={maxFollowers}
               onChange={(event) => setMaxFollowers(event.target.value)}
               placeholder="No maximum"
-              className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+              className="w-full rounded-md border bg-white px-3 py-1.5 font-mono text-xs outline-none focus:border-amber-600 dark:bg-zinc-950 dark:border-zinc-800"
             />
           </div>
           <div>
@@ -267,39 +323,79 @@ export function LeadsBrowser() {
               htmlFor={`${idPrefix}-location`}
               className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400"
             >
-              Country or location
+              Location Match
             </label>
             <input
               id={`${idPrefix}-location`}
               value={location}
               onChange={(event) => setLocation(event.target.value)}
               maxLength={200}
-              placeholder="e.g. Ghana or Accra"
-              className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+              placeholder="e.g. California"
+              className="w-full rounded-md border bg-white px-3 py-1.5 text-xs outline-none focus:border-amber-600 dark:bg-zinc-950 dark:border-zinc-800"
             />
           </div>
           <div className="flex items-end">
             <button
               type="submit"
-              className="w-full rounded-md bg-accent px-4 py-2 text-xs font-medium text-white hover:opacity-90"
+              className="w-full rounded-md bg-accent px-4 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90"
             >
-              Apply
+              Apply Filter Query
             </button>
           </div>
         </div>
-        {rangeError && <p className="mt-2 text-xs text-status-danger">{rangeError}</p>}
+        {rangeError && <p className="text-xs text-red-500">{rangeError}</p>}
       </form>
+
+      {/* Selected Action Floating Bar */}
+      {selectedLeadIds.size > 0 && (
+        <div className="sticky top-4 z-20 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-600/30 bg-zinc-900 p-3.5 text-white shadow-xl dark:bg-zinc-900">
+          <div className="flex items-center gap-3">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-500 font-mono text-xs font-bold text-zinc-950">
+              {selectedLeadIds.size}
+            </span>
+            <span className="font-mono text-xs font-semibold">
+              {selectedLeadIds.size} lead{selectedLeadIds.size === 1 ? "" : "s"} selected
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                const selectedLeads = leads.filter((l) => selectedLeadIds.has(l.id));
+                exportLeadsToCsv(selectedLeads);
+              }}
+              className="rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 font-mono text-xs font-medium text-zinc-200 hover:bg-zinc-700"
+            >
+              Export Selected CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowCreateList(true)}
+              className="rounded bg-accent px-3 py-1.5 font-mono text-xs font-semibold text-white hover:opacity-90"
+            >
+              Save to Lead List
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmBulkDelete(true)}
+              className="rounded border border-red-500/30 bg-red-500/10 px-3 py-1.5 font-mono text-xs font-medium text-red-400 hover:bg-red-500/20"
+            >
+              Delete Selected
+            </button>
+          </div>
+        </div>
+      )}
 
       {query.isLoading ? (
         <SkeletonRows rows={8} cols={7} />
       ) : noLeadsAtAll ? (
         <EmptyState
-          title="No leads yet"
+          title="No leads stored yet"
           description="Trigger a scrape to start collecting leads."
           action={
             <Link
               to="/scrapes/new"
-              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+              className="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
             >
               Trigger Scrape
             </Link>
@@ -308,32 +404,13 @@ export function LeadsBrowser() {
       ) : leads.length === 0 ? (
         <EmptyState title="No leads match these filters" />
       ) : (
-        <>
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border px-3 py-2">
-            <span className="text-sm text-zinc-500">
-              {selectedLeadIds.size > 0
-                ? `${selectedLeadIds.size} selected`
-                : `${formatNumber(total)} matching lead${total === 1 ? "" : "s"} — select across pages to act on them`}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between text-xs text-zinc-500">
+            <span className="font-mono">
+              Showing {leads.length} of {formatNumber(total)} total matching leads
             </span>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={selectedLeadIds.size === 0}
-                onClick={() => setShowCreateList(true)}
-                className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-zinc-50 disabled:opacity-40 dark:hover:bg-zinc-800"
-              >
-                Create lead list
-              </button>
-              <button
-                type="button"
-                disabled={selectedLeadIds.size === 0}
-                onClick={() => setConfirmBulkDelete(true)}
-                className="rounded-md border border-status-danger-bg px-3 py-1.5 text-xs font-medium text-status-danger hover:bg-status-danger-bg disabled:opacity-40"
-              >
-                Delete selected
-              </button>
-            </div>
           </div>
+
           <LeadsTable
             leads={leads}
             onRowClick={setSelected}
@@ -342,7 +419,8 @@ export function LeadsBrowser() {
             onSelectionChange={setLeadSelected}
             onSelectAll={selectAllVisible}
           />
-          <div className="flex items-center justify-between text-sm text-zinc-500">
+
+          <div className="flex items-center justify-between font-mono text-xs text-zinc-500">
             <span>
               Page {page} of {totalPages}
             </span>
@@ -351,21 +429,21 @@ export function LeadsBrowser() {
                 type="button"
                 disabled={page === 1}
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
-                className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-zinc-50 disabled:opacity-40 dark:hover:bg-zinc-800"
+                className="rounded border border-zinc-200 bg-white px-3 py-1 font-medium hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
               >
-                Previous
+                ← Previous
               </button>
               <button
                 type="button"
                 disabled={page >= totalPages}
                 onClick={() => setPage((p) => p + 1)}
-                className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-zinc-50 disabled:opacity-40 dark:hover:bg-zinc-800"
+                className="rounded border border-zinc-200 bg-white px-3 py-1 font-medium hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
               >
-                Next
+                Next →
               </button>
             </div>
           </div>
-        </>
+        </div>
       )}
 
       {selected && <LeadDetailDrawer lead={selected} onClose={() => setSelected(null)} onDelete={setDeleting} />}
@@ -373,11 +451,11 @@ export function LeadsBrowser() {
       {showCreateList && (
         <Modal title="Create lead list" onClose={() => setShowCreateList(false)}>
           <form onSubmit={submitCreateList} className="space-y-4">
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            <p className="text-xs text-zinc-600 dark:text-zinc-400">
               Create a static list from the {selectedLeadIds.size} selected lead{selectedLeadIds.size === 1 ? "" : "s"}.
             </p>
             <div>
-              <label htmlFor={`${idPrefix}-list-name`} className="mb-1 block text-sm font-medium">
+              <label htmlFor={`${idPrefix}-list-name`} className="mb-1 block text-xs font-semibold uppercase text-zinc-700 dark:text-zinc-300">
                 List name
               </label>
               <input
@@ -387,25 +465,25 @@ export function LeadsBrowser() {
                 maxLength={100}
                 value={listName}
                 onChange={(event) => setListName(event.target.value)}
-                placeholder="e.g. Qualified leads"
-                className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+                placeholder="e.g. High Priority SaaS Leads"
+                className="w-full rounded-md border bg-transparent px-3 py-2 text-xs outline-none focus:border-amber-600 dark:border-zinc-800"
               />
             </div>
             {createListMutation.error instanceof ApiError && (
-              <p className="text-sm text-status-danger">{createListMutation.error.message}</p>
+              <p className="text-xs text-red-500">{createListMutation.error.message}</p>
             )}
             <div className="flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setShowCreateList(false)}
-                className="rounded-md border px-3 py-1.5 text-sm font-medium"
+                className="rounded-md border px-3 py-1.5 text-xs font-medium"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={!listName.trim() || createListMutation.isPending}
-                className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+                className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
               >
                 {createListMutation.isPending ? "Creating..." : "Create list"}
               </button>
@@ -425,7 +503,7 @@ export function LeadsBrowser() {
       )}
 
       {bulkDeleteMutation.error instanceof Error && (
-        <p className="text-sm text-status-danger">{bulkDeleteMutation.error.message}</p>
+        <p className="text-xs text-red-500">{bulkDeleteMutation.error.message}</p>
       )}
 
       {deleting && (

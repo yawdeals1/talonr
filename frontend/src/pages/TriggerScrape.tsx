@@ -131,222 +131,277 @@ export function TriggerScrape() {
   const apiError = mutation.error instanceof ApiError ? mutation.error.message : null;
 
   return (
-    <div className="max-w-lg">
-      <h1 className="mb-6 text-lg font-semibold text-zinc-900 dark:text-zinc-100">Trigger Scrape</h1>
+    <div className="max-w-4xl space-y-6">
+      <div>
+        <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+          Trigger New Scrape
+        </h1>
+        <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+          Configure scrape target, X account session, engagement rules, and lead criteria filters.
+        </p>
+      </div>
 
-      <form onSubmit={handleSubmit} className="space-y-5">
-        <div>
-          <label
-            htmlFor={`${idPrefix}-account`}
-            className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
-          >
-            X account
-          </label>
-          {accounts.length === 0 ? (
-            <p className="text-sm text-zinc-500">
-              No X accounts connected. Connect one on the X Accounts screen first.
-            </p>
-          ) : (
-            <select
-              id={`${idPrefix}-account`}
-              value={xAccountId}
-              onChange={(e) => setXAccountId(e.target.value)}
-              className="w-full rounded-md border bg-transparent px-3 py-2 text-sm text-zinc-900 outline-none focus:border-accent dark:text-zinc-100"
-            >
-              <option value="" className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
-                Select an account…
-              </option>
-              {accounts.map((a) => (
-                <option
-                  key={a.id}
-                  value={a.id}
-                  disabled={a.status !== "active"}
-                  className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100"
-                >
-                  @{a.handle} {a.status !== "active" ? `(${a.status})` : ""}
-                </option>
-              ))}
-            </select>
-          )}
-          {activeAccounts.length === 0 && accounts.length > 0 && (
-            <p className="mt-1 text-xs text-status-warning">No active accounts available to scrape with.</p>
-          )}
-        </div>
-
-        <div>
-          <label id={`${idPrefix}-source-type-label`} className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-            Source type
-          </label>
-          <div className="flex rounded-md border p-0.5" role="group" aria-labelledby={`${idPrefix}-source-type-label`}>
-            {SOURCE_TYPES.map((s) => (
-              <button
-                key={s.value}
-                type="button"
-                aria-pressed={sourceType === s.value}
-                onClick={() => setSourceType(s.value)}
-                className={`flex-1 rounded-[5px] py-1.5 text-sm font-medium transition-colors ${
-                  sourceType === s.value
-                    ? "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-50"
-                    : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-                }`}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
-          <p className="mt-1 text-xs text-zinc-500">{sourceMeta.description}</p>
-        </div>
-
-        <div>
-          <label
-            htmlFor={`${idPrefix}-source-ref`}
-            className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
-          >
-            {sourceMeta.fieldLabel}
-          </label>
-          <input
-            id={`${idPrefix}-source-ref`}
-            value={sourceRef}
-            onChange={(e) => setSourceRef(e.target.value)}
-            placeholder={sourceMeta.placeholder}
-            className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
-          />
-        </div>
-
-        {sourceType === "engagers" && (
-          <div>
-            <span className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">Engagement types</span>
-            <div className="space-y-2">
-              {ENGAGEMENT_TYPES.map((t) => (
-                <label key={t.value} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={engagementTypes.includes(t.value)}
-                    onChange={() => toggleEngagementType(t.value)}
-                    className="h-4 w-4 rounded border-zinc-300 accent-accent"
-                  />
-                  {t.label}
-                </label>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div>
-          <label
-            htmlFor={`${idPrefix}-cap-leads`}
-            className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
-          >
-            Cap on leads <span className="text-zinc-400">(optional, max 1000)</span>
-          </label>
-          <input
-            id={`${idPrefix}-cap-leads`}
-            type="number"
-            min={1}
-            max={1000}
-            placeholder="System default"
-            value={capLeads}
-            onChange={(e) => setCapLeads(e.target.value)}
-            className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
-          />
-        </div>
-
-        <fieldset className="space-y-3 rounded-lg border p-4">
-          <legend className="px-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
-            Result filters <span className="font-normal text-zinc-400">(optional)</span>
-          </legend>
-          <p className="text-xs text-zinc-500">
-            Set these and the scrape keeps checking profiles until it has a full lead cap of accounts that match,
-            instead of stopping at the first accounts in the list. Only the accounts that match get saved —
-            leave these empty to keep every profile the scrape reads.
-          </p>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label
-                htmlFor={`${idPrefix}-min-followers`}
-                className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400"
-              >
-                Min followers
-              </label>
-              <input
-                id={`${idPrefix}-min-followers`}
-                type="number"
-                min={0}
-                step={1}
-                value={minFollowers}
-                onChange={(event) => setMinFollowers(event.target.value)}
-                placeholder="No minimum"
-                className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor={`${idPrefix}-max-followers`}
-                className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400"
-              >
-                Max followers
-              </label>
-              <input
-                id={`${idPrefix}-max-followers`}
-                type="number"
-                min={0}
-                step={1}
-                value={maxFollowers}
-                onChange={(event) => setMaxFollowers(event.target.value)}
-                placeholder="No maximum"
-                className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
-              />
-            </div>
-          </div>
-
-          <div>
+      <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="space-y-6 lg:col-span-2">
+          {/* Account Selection */}
+          <div className="rounded-lg border bg-white p-4 dark:bg-zinc-950 dark:border-zinc-800">
             <label
-              htmlFor={`${idPrefix}-location`}
-              className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400"
+              htmlFor={`${idPrefix}-account`}
+              className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-300"
             >
-              Country or location
+              1. Select X Account
             </label>
-            <input
-              id={`${idPrefix}-location`}
-              value={location}
-              onChange={(event) => setLocation(event.target.value)}
-              maxLength={200}
-              placeholder="e.g. Ghana or Accra"
-              className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
-            />
+            {accounts.length === 0 ? (
+              <p className="text-xs text-zinc-500">
+                No X accounts connected. Connect one on the X Accounts screen first.
+              </p>
+            ) : (
+              <select
+                id={`${idPrefix}-account`}
+                value={xAccountId}
+                onChange={(e) => setXAccountId(e.target.value)}
+                className="w-full rounded-md border bg-transparent px-3 py-2 font-mono text-xs text-zinc-900 outline-none focus:border-amber-600 dark:text-zinc-100 dark:border-zinc-800"
+              >
+                <option value="" className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
+                  Select an account…
+                </option>
+                {accounts.map((a) => (
+                  <option
+                    key={a.id}
+                    value={a.id}
+                    disabled={a.status !== "active"}
+                    className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100"
+                  >
+                    @{a.handle} {a.status !== "active" ? `(${a.status})` : ""}
+                  </option>
+                ))}
+              </select>
+            )}
+            {activeAccounts.length === 0 && accounts.length > 0 && (
+              <p className="mt-1.5 text-xs text-amber-600 font-mono">No active accounts available to scrape with.</p>
+            )}
           </div>
 
-          <label className="flex items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-            <input
-              type="checkbox"
-              checked={verifiedOnly}
-              onChange={(event) => setVerifiedOnly(event.target.checked)}
-              className="mt-0.5 h-4 w-4 shrink-0 accent-accent"
-            />
-            <span>
-              Verified accounts only
-              <span className="mt-0.5 block text-xs font-normal text-zinc-500">
-                Read from the list itself, so unverified accounts are skipped without spending a profile
-                check on them — this makes the scrape reach its cap faster.
+          {/* Source Type Selection Cards */}
+          <div className="rounded-lg border bg-white p-4 dark:bg-zinc-950 dark:border-zinc-800 space-y-3">
+            <label className="block text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
+              2. Select Source Type
+            </label>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {SOURCE_TYPES.map((s) => {
+                const isSelected = sourceType === s.value;
+                return (
+                  <button
+                    key={s.value}
+                    type="button"
+                    onClick={() => setSourceType(s.value)}
+                    className={`flex flex-col justify-between rounded-md border p-3 text-left transition-colors ${
+                      isSelected
+                        ? "border-amber-600 bg-amber-500/10 dark:border-amber-500 dark:bg-amber-500/10"
+                        : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-xs font-bold uppercase text-zinc-900 dark:text-zinc-100">
+                        {s.label}
+                      </span>
+                      {isSelected && (
+                        <span className="h-2 w-2 rounded-full bg-amber-500" />
+                      )}
+                    </div>
+                    <p className="mt-2 text-[11px] text-zinc-500 leading-tight dark:text-zinc-400">
+                      {s.description}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="pt-2">
+              <label
+                htmlFor={`${idPrefix}-source-ref`}
+                className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300"
+              >
+                {sourceMeta.fieldLabel}
+              </label>
+              <input
+                id={`${idPrefix}-source-ref`}
+                value={sourceRef}
+                onChange={(e) => setSourceRef(e.target.value)}
+                placeholder={sourceMeta.placeholder}
+                className="w-full rounded-md border bg-transparent px-3 py-2 font-mono text-xs outline-none focus:border-amber-600 dark:border-zinc-800"
+              />
+            </div>
+
+            {sourceType === "engagers" && (
+              <div className="pt-2 space-y-2">
+                <span className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">Engagement Strategy</span>
+                <div className="flex gap-4">
+                  {ENGAGEMENT_TYPES.map((t) => (
+                    <label key={t.value} className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={engagementTypes.includes(t.value)}
+                        onChange={() => toggleEngagementType(t.value)}
+                        className="h-3.5 w-3.5 rounded border-zinc-300 accent-amber-600 dark:border-zinc-700"
+                      />
+                      <span>{t.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Lead Filters Section */}
+          <div className="rounded-lg border bg-white p-4 dark:bg-zinc-950 dark:border-zinc-800 space-y-4">
+            <label className="block text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
+              3. Target Criteria & Lead Limits
+            </label>
+
+            <div>
+              <label
+                htmlFor={`${idPrefix}-cap-leads`}
+                className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300"
+              >
+                Cap on leads <span className="text-zinc-400 font-mono">(optional, max 1000)</span>
+              </label>
+              <input
+                id={`${idPrefix}-cap-leads`}
+                type="number"
+                min={1}
+                max={1000}
+                placeholder="100"
+                value={capLeads}
+                onChange={(e) => setCapLeads(e.target.value)}
+                className="w-full rounded-md border bg-transparent px-3 py-2 font-mono text-xs outline-none focus:border-amber-600 dark:border-zinc-800"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label
+                  htmlFor={`${idPrefix}-min-followers`}
+                  className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400"
+                >
+                  Min followers
+                </label>
+                <input
+                  id={`${idPrefix}-min-followers`}
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={minFollowers}
+                  onChange={(event) => setMinFollowers(event.target.value)}
+                  placeholder="0"
+                  className="w-full rounded-md border bg-transparent px-3 py-2 font-mono text-xs outline-none focus:border-amber-600 dark:border-zinc-800"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor={`${idPrefix}-max-followers`}
+                  className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400"
+                >
+                  Max followers
+                </label>
+                <input
+                  id={`${idPrefix}-max-followers`}
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={maxFollowers}
+                  onChange={(event) => setMaxFollowers(event.target.value)}
+                  placeholder="No limit"
+                  className="w-full rounded-md border bg-transparent px-3 py-2 font-mono text-xs outline-none focus:border-amber-600 dark:border-zinc-800"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label
+                htmlFor={`${idPrefix}-location`}
+                className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400"
+              >
+                Country or location filter
+              </label>
+              <input
+                id={`${idPrefix}-location`}
+                value={location}
+                onChange={(event) => setLocation(event.target.value)}
+                maxLength={200}
+                placeholder="e.g. San Francisco or London"
+                className="w-full rounded-md border bg-transparent px-3 py-2 text-xs outline-none focus:border-amber-600 dark:border-zinc-800"
+              />
+            </div>
+
+            <label className="flex items-start gap-2 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={verifiedOnly}
+                onChange={(event) => setVerifiedOnly(event.target.checked)}
+                className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-amber-600"
+              />
+              <span>
+                Verified accounts only
+                <span className="mt-0.5 block text-[11px] text-zinc-500 dark:text-zinc-400">
+                  Filters unverified accounts immediately from list cells without sequential profile enrichment.
+                </span>
               </span>
-            </span>
-          </label>
+            </label>
+          </div>
+        </div>
 
-          <p className="text-xs text-zinc-500">
-            Accounts with unknown follower counts are excluded when a follower bound is set.
-          </p>
-        </fieldset>
+        {/* Live Config Summary Sidebar */}
+        <div className="space-y-4">
+          <div className="sticky top-6 rounded-lg border bg-zinc-50 p-4 space-y-4 dark:bg-zinc-900/50 dark:border-zinc-800">
+            <h3 className="font-mono text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-300 border-b pb-2 dark:border-zinc-800">
+              Scrape Job Overview
+            </h3>
 
-        {(formError || apiError) && <p className="text-sm text-status-danger">{formError ?? apiError}</p>}
+            <div className="space-y-3 text-xs">
+              <div className="flex justify-between">
+                <span className="text-zinc-500">Account:</span>
+                <span className="font-mono font-bold text-amber-700 dark:text-amber-400">
+                  {xAccountId ? `@${accounts.find((a) => a.id === xAccountId)?.handle}` : "Not selected"}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-zinc-500">Type:</span>
+                <span className="font-mono font-semibold uppercase">{sourceType}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-zinc-500">Target:</span>
+                <span className="font-mono truncate max-w-[140px]">{sourceRef || "—"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-zinc-500">Lead Cap:</span>
+                <span className="font-mono">{capLeads || "System default"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-zinc-500">Min Followers:</span>
+                <span className="font-mono">{minFollowers || "None"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-zinc-500">Verified Only:</span>
+                <span className="font-mono">{verifiedOnly ? "Yes" : "No"}</span>
+              </div>
+            </div>
 
-        <button
-          type="submit"
-          disabled={mutation.isPending || accounts.length === 0}
-          className="w-full rounded-md bg-accent py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
-        >
-          {mutation.isPending ? "Starting…" : "Start scrape"}
-        </button>
+            {(formError || apiError) && (
+              <p className="rounded border border-red-500/20 bg-red-500/10 p-2 text-xs font-medium text-red-600 dark:text-red-400">
+                {formError ?? apiError}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={mutation.isPending || accounts.length === 0}
+              className="w-full rounded-md bg-accent py-2.5 text-xs font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            >
+              {mutation.isPending ? "Launching Worker Scrape…" : "Execute Scrape Job"}
+            </button>
+          </div>
+        </div>
       </form>
     </div>
   );

@@ -88,34 +88,46 @@ export function LoginRegister() {
   }
 
   return (
-    <div className="flex h-full items-center justify-center bg-zinc-50 dark:bg-zinc-950">
-      <div className="w-full max-w-sm rounded-lg border bg-white p-6 dark:bg-zinc-900/40">
-        <div className="mb-6 flex items-center gap-2">
-          <img src="/favicon.png" alt="" className="h-5 w-5" />
-          <p className="font-mono text-sm font-semibold text-zinc-900 dark:text-zinc-50">talonr</p>
+    <div className="flex h-full items-center justify-center bg-zinc-50 p-4 dark:bg-zinc-950">
+      <div className="w-full max-w-sm rounded-xl border bg-white p-6 shadow-xl dark:bg-zinc-900/60 dark:border-zinc-800">
+        <div className="mb-6 flex items-center justify-between border-b pb-4 dark:border-zinc-800">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-7 w-7 items-center justify-center rounded bg-accent font-mono text-sm font-bold text-white">
+              T
+            </div>
+            <div>
+              <span className="font-mono text-base font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
+                talonr
+              </span>
+              <p className="font-mono text-[10px] uppercase text-zinc-400">Operator Console</p>
+            </div>
+          </div>
+          <span className="rounded border bg-zinc-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-zinc-500 uppercase dark:bg-zinc-800 dark:text-zinc-400">
+            Auth
+          </span>
         </div>
 
-        <div className="mb-6 flex rounded-md border p-0.5">
+        <div className="mb-6 flex rounded-lg border bg-zinc-50 p-1 dark:bg-zinc-950 dark:border-zinc-800">
           {(["login", "register"] as const).map((t) => (
             <button
               key={t}
               type="button"
               onClick={() => switchTab(t)}
-              className={`flex-1 rounded-[5px] py-1.5 text-sm font-medium transition-colors ${
+              className={`flex-1 rounded-md py-1.5 font-mono text-xs font-semibold transition-colors ${
                 tab === t
-                  ? "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-50"
+                  ? "bg-white text-zinc-900 shadow-xs dark:bg-zinc-800 dark:text-zinc-50"
                   : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
               }`}
             >
-              {t === "login" ? "Log in" : "Register"}
+              {t === "login" ? "Log In" : "Register"}
             </button>
           ))}
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label htmlFor="email" className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-              Email
+            <label htmlFor="email" className="mb-1 block text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
+              Email Address
             </label>
             <input
               id="email"
@@ -125,57 +137,55 @@ export function LoginRegister() {
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+              placeholder="operator@domain.com"
+              className="w-full rounded-md border bg-transparent px-3 py-2 text-xs text-zinc-900 outline-none focus:border-amber-600 dark:text-zinc-100 dark:border-zinc-800"
             />
           </div>
 
           <div>
-            <label htmlFor="password" className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-              Password
-            </label>
+            <div className="mb-1 flex items-center justify-between">
+              <label htmlFor="password" className="block text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
+                Password
+              </label>
+              {tab === "login" && (
+                <Link to="/forgot-password" className="font-mono text-[11px] text-amber-700 hover:underline dark:text-amber-400">
+                  Forgot password?
+                </Link>
+              )}
+            </div>
             <input
               id="password"
               name="password"
               type="password"
               required
               minLength={tab === "login" ? undefined : 8}
-              // Browser password managers key their "suggest a strong password" / "save password"
-              // heuristics off name + autocomplete together, not autocomplete alone — a missing
-              // `name` was silently weakening that signal. Login keeps "current-password" so
-              // browsers can offer to autofill an existing saved credential there.
               autoComplete={tab === "login" ? "current-password" : "new-password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+              placeholder="••••••••"
+              className="w-full rounded-md border bg-transparent px-3 py-2 text-xs text-zinc-900 outline-none focus:border-amber-600 dark:text-zinc-100 dark:border-zinc-800"
             />
             {tab === "register" ? <PasswordCriteriaList checks={passwordChecks} /> : null}
-            {tab === "login" ? (
-              <Link to="/forgot-password" className="mt-1.5 inline-block text-xs text-accent-text hover:underline">
-                Forgot password?
-              </Link>
-            ) : null}
           </div>
 
           {tab === "register" ? (
             <div>
-              <label htmlFor="confirm-password" className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                Confirm password
+              <label htmlFor="confirm-password" className="mb-1 block text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
+                Confirm Password
               </label>
               <input
                 id="confirm-password"
                 name="confirmPassword"
                 type="password"
                 required
-                // A second new-password field is also one of the strongest structural signals
-                // Chrome's password manager uses to recognize a signup form and offer to
-                // generate/suggest a password in the first place.
                 autoComplete="new-password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-accent"
+                placeholder="••••••••"
+                className="w-full rounded-md border bg-transparent px-3 py-2 text-xs text-zinc-900 outline-none focus:border-amber-600 dark:text-zinc-100 dark:border-zinc-800"
               />
               {confirmPassword.length > 0 && !passwordsMatch ? (
-                <p className="mt-1 text-xs text-status-danger">Passwords do not match.</p>
+                <p className="mt-1 font-mono text-[11px] text-red-500">Passwords do not match.</p>
               ) : null}
             </div>
           ) : null}
@@ -184,15 +194,15 @@ export function LoginRegister() {
             <TurnstileWidget onToken={setTurnstileToken} resetKey={turnstileResetKey} />
           ) : null}
 
-          {notice && <p className="text-sm text-status-success">{notice}</p>}
-          {error && <p className="text-sm text-status-danger">{error}</p>}
+          {notice && <p className="rounded border border-emerald-500/20 bg-emerald-500/10 p-2 font-mono text-xs text-emerald-600 dark:text-emerald-400">{notice}</p>}
+          {error && <p className="rounded border border-red-500/20 bg-red-500/10 p-2 font-mono text-xs text-red-600 dark:text-red-400">{error}</p>}
 
           <button
             type="submit"
             disabled={submitting}
-            className="w-full rounded-md bg-accent py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            className="w-full rounded-md bg-accent py-2.5 font-mono text-xs font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
           >
-            {submitting ? "Please wait…" : tab === "login" ? "Log in" : "Create account"}
+            {submitting ? "Processing Request…" : tab === "login" ? "Log In to Console" : "Create Operator Account"}
           </button>
         </form>
       </div>

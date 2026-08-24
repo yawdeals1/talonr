@@ -16,12 +16,25 @@ const STYLES: Record<PillStatus, string> = {
   banned: "bg-status-danger-bg text-status-danger",
 };
 
+const DOT_STYLES: Record<PillStatus, string> = {
+  active: "bg-emerald-500",
+  completed: "bg-emerald-500",
+  running: "bg-blue-500 animate-pulse-dot",
+  queued: "bg-zinc-400",
+  cancelled: "bg-zinc-400",
+  paused: "bg-amber-500",
+  checkpointed: "bg-amber-500",
+  failed: "bg-red-500",
+  banned: "bg-red-500",
+};
+
 export function StatusPill({ status }: { status: PillStatus }) {
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 font-mono text-[11px] font-medium tracking-wide uppercase ${STYLES[status]}`}
+      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-mono text-[11px] font-medium tracking-wider uppercase border border-current/10 ${STYLES[status]}`}
     >
-      {status}
+      <span className={`h-1.5 w-1.5 rounded-full ${DOT_STYLES[status] || "bg-current"}`} />
+      <span>{status}</span>
     </span>
   );
 }

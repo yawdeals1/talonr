@@ -96,14 +96,24 @@ export function XAccounts() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">X Accounts</h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+            X Accounts Management
+          </h1>
+          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+            Manage authenticated X user sessions, daily rate limit quotas, proxy settings, and session health checks.
+          </p>
+        </div>
         <button
           type="button"
           onClick={() => setShowConnect(true)}
-          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+          className="inline-flex items-center justify-center gap-2 rounded-md bg-accent px-4 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90"
         >
-          Connect Account
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+          </svg>
+          <span>Connect New Account</span>
         </button>
       </div>
 
@@ -115,14 +125,14 @@ export function XAccounts() {
             <button
               type="button"
               onClick={() => setShowConnect(true)}
-              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+              className="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
             >
               Connect Account
             </button>
           }
         />
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {accounts.map((account) => {
             const reason = checkpointReasonFor(account, jobs);
             const resting = restingUntil(account);
@@ -130,89 +140,95 @@ export function XAccounts() {
             const checking = checkInFlight(account);
             const canRecheck = account.status === "checkpointed" && account.hasSession;
             return (
-              <div key={account.id} className="flex flex-col gap-3 rounded-lg border p-4">
-                <div className="flex items-start justify-between">
-                  <span className="font-mono text-sm font-medium">@{account.handle}</span>
-                  <StatusPill status={account.status} />
+              <div key={account.id} className="flex flex-col justify-between rounded-lg border bg-zinc-50/50 p-4 transition-colors hover:border-zinc-300 dark:bg-zinc-900/40 dark:border-zinc-800 dark:hover:border-zinc-700">
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between border-b pb-3 dark:border-zinc-800">
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-zinc-200 font-mono text-xs font-bold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                        {account.handle.substring(0, 1).toUpperCase()}
+                      </div>
+                      <span className="font-mono text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                        @{account.handle}
+                      </span>
+                    </div>
+                    <StatusPill status={account.status} />
+                  </div>
+
+                  {!account.hasSession && (
+                    <p className="rounded border border-amber-500/20 bg-amber-500/10 p-2 font-mono text-xs text-amber-600 dark:text-amber-400">
+                      Not connected yet — session cookies not captured.
+                    </p>
+                  )}
+
+                  {resting && (
+                    <p className="rounded border border-amber-500/20 bg-amber-500/10 p-2 font-mono text-xs text-amber-600 dark:text-amber-400">
+                      Resting until {formatDateTime(resting)} — rate limit cooldown active.
+                    </p>
+                  )}
+
+                  {canRecheck && (
+                    <button
+                      type="button"
+                      disabled={checking || revalidateMutation.isPending}
+                      onClick={() => revalidateMutation.mutate(account.id)}
+                      className="w-full rounded border border-amber-600 px-3 py-1.5 font-mono text-xs font-semibold text-amber-600 hover:bg-amber-500/10 disabled:opacity-60 dark:text-amber-400"
+                    >
+                      {checking ? "Checking session…" : "Re-check session health"}
+                    </button>
+                  )}
+
+                  {(!account.hasSession || reason) && (
+                    <button
+                      type="button"
+                      onClick={() => setJustConnected(account)}
+                      className="w-full rounded border border-amber-600 px-3 py-1.5 font-mono text-xs font-semibold text-amber-600 hover:bg-amber-500/10 dark:text-amber-400"
+                    >
+                      {reason ? "Reconnect Session" : "Finish Connecting"}
+                    </button>
+                  )}
+
+                  {check?.state === "unhealthy" && (
+                    <p className="rounded border border-red-500/20 bg-red-500/10 p-2 font-mono text-xs text-red-600 dark:text-red-400">
+                      {check.reason}
+                    </p>
+                  )}
+
+                  {revalidateMutation.error instanceof ApiError && revalidateMutation.variables === account.id && (
+                    <p className="font-mono text-xs text-red-500">{revalidateMutation.error.message}</p>
+                  )}
+
+                  {reason && (
+                    <p className="rounded border border-amber-500/20 bg-amber-500/10 p-2 font-mono text-xs text-amber-600 dark:text-amber-400">
+                      {reason}
+                    </p>
+                  )}
+
+                  <dl className="grid grid-cols-2 gap-y-1.5 rounded-md border bg-white p-3 text-xs dark:bg-zinc-950 dark:border-zinc-800/80">
+                    <dt className="text-zinc-500 dark:text-zinc-400">Daily limit</dt>
+                    <dd className="text-right font-mono font-bold text-zinc-900 dark:text-zinc-100">{account.dailyScrapeLimit}</dd>
+                    <dt className="text-zinc-500 dark:text-zinc-400">Max concurrency</dt>
+                    <dd className="text-right font-mono font-bold text-zinc-900 dark:text-zinc-100">{account.maxConcurrency}</dd>
+                    <dt className="text-zinc-500 dark:text-zinc-400">Last used</dt>
+                    <dd className="text-right font-mono text-zinc-900 dark:text-zinc-100">
+                      {account.lastUsedAt ? formatDateTime(account.lastUsedAt) : "Never"}
+                    </dd>
+                  </dl>
                 </div>
 
-                {!account.hasSession && (
-                  <p className="text-xs text-status-warning">Not connected yet — session not captured.</p>
-                )}
-
-                {/* Resting is not a problem to fix: the account is connected and X is simply being
-                    given room. Said plainly here so it isn't mistaken for a checkpoint. */}
-                {resting && (
-                  <p className="rounded border border-status-warning-bg bg-status-warning-bg px-2 py-1 text-xs text-status-warning">
-                    Resting until {formatDateTime(resting)} — X asked for less traffic. Still connected;
-                    queued scrapes start again on their own.
-                  </p>
-                )}
-
-                {/* Offered ahead of Reconnect: it settles the same question in seconds, and only
-                    falls through to the login script when the saved session really is dead. */}
-                {canRecheck && (
-                  <button
-                    type="button"
-                    disabled={checking || revalidateMutation.isPending}
-                    onClick={() => revalidateMutation.mutate(account.id)}
-                    className="rounded-md border border-accent px-2 py-1.5 text-xs font-medium text-accent hover:bg-accent/10 disabled:opacity-60"
-                  >
-                    {checking ? "Checking session…" : "Re-check session"}
-                  </button>
-                )}
-
-                {(!account.hasSession || reason) && (
-                  <button
-                    type="button"
-                    onClick={() => setJustConnected(account)}
-                    className="rounded-md border border-accent px-2 py-1.5 text-xs font-medium text-accent hover:bg-accent/10"
-                  >
-                    {reason ? "Reconnect" : "Finish connecting"}
-                  </button>
-                )}
-
-                {check?.state === "unhealthy" && (
-                  <p className="rounded border border-status-danger-bg bg-status-danger-bg px-2 py-1 text-xs text-status-danger">
-                    {check.reason}
-                  </p>
-                )}
-
-                {revalidateMutation.error instanceof ApiError && revalidateMutation.variables === account.id && (
-                  <p className="text-xs text-status-danger">{revalidateMutation.error.message}</p>
-                )}
-
-                {reason && (
-                  <p className="rounded border border-status-warning-bg bg-status-warning-bg px-2 py-1 text-xs text-status-warning">
-                    {reason}
-                  </p>
-                )}
-
-                <dl className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs text-zinc-500">
-                  <dt>Daily limit</dt>
-                  <dd className="text-right font-mono">{account.dailyScrapeLimit}</dd>
-                  <dt>Max concurrency</dt>
-                  <dd className="text-right font-mono">{account.maxConcurrency}</dd>
-                  <dt>Last used</dt>
-                  <dd className="text-right font-mono">
-                    {account.lastUsedAt ? formatDateTime(account.lastUsedAt) : "—"}
-                  </dd>
-                </dl>
-
-                <div className="mt-auto flex gap-2 pt-2">
+                <div className="mt-4 flex gap-2 border-t pt-3 dark:border-zinc-800">
                   <button
                     type="button"
                     onClick={() => setEditing(account)}
-                    className="flex-1 rounded-md border px-2 py-1.5 text-xs font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                    className="flex-1 rounded border border-zinc-200 bg-white py-1.5 font-mono text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
                   >
-                    Edit
+                    Edit Config
                   </button>
                   <button
                     type="button"
                     onClick={() => setDeleting(account)}
-                    className="flex-1 rounded-md border px-2 py-1.5 text-xs font-medium text-status-danger hover:bg-status-danger-bg"
+                    className="flex-1 rounded border border-red-500/20 py-1.5 font-mono text-xs font-medium text-red-600 hover:bg-red-500/10 dark:text-red-400"
                   >
-                    Delete
+                    Delete Account
                   </button>
                 </div>
               </div>
@@ -220,6 +236,7 @@ export function XAccounts() {
           })}
         </div>
       )}
+
 
       {showConnect && (
         <ConnectAccountModal
