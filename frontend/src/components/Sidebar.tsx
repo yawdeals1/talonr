@@ -97,9 +97,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       <div>
         <div className="flex h-14 items-center justify-between border-b px-4 dark:border-zinc-800">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-6 w-6 items-center justify-center rounded bg-accent text-white font-mono text-xs font-bold">
-              T
-            </div>
+            <img src="/icon.png" alt="" className="h-6 w-6 object-contain dark:hidden" />
+            <img src="/icon-dark.png" alt="" className="hidden h-6 w-6 object-contain dark:block" />
             <span className="font-mono text-sm font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
               talonr
             </span>

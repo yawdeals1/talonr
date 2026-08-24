@@ -92,9 +92,8 @@ export function LoginRegister() {
       <div className="w-full max-w-sm rounded-xl border bg-white p-6 shadow-xl dark:bg-zinc-900/60 dark:border-zinc-800">
         <div className="mb-6 flex items-center justify-between border-b pb-4 dark:border-zinc-800">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded bg-accent font-mono text-sm font-bold text-white">
-              T
-            </div>
+            <img src="/icon.png" alt="" className="h-7 w-7 object-contain dark:hidden" />
+            <img src="/icon-dark.png" alt="" className="hidden h-7 w-7 object-contain dark:block" />
             <div>
               <span className="font-mono text-base font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
                 talonr
