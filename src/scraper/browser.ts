@@ -12,7 +12,15 @@ export async function launchScrapeSession(
   storageState: StorageState,
   proxy: ProxyConfig | null
 ): Promise<ScrapeSession> {
-  const browser = await chromium.launch({ headless: true });
+  // shm_size is bumped to 1gb in docker-compose.yml, but Chromium's renderer still reaches for
+  // /dev/shm for buffers outside that allowance and can crash ("Target crashed") on a media-heavy
+  // page — --disable-dev-shm-usage routes it to /tmp instead. --disable-gpu avoids GPU-accelerated
+  // compositing crashes on a headless VPS with no real GPU, where software rendering is what runs
+  // either way.
+  const browser = await chromium.launch({
+    headless: true,
+    args: ["--disable-dev-shm-usage", "--disable-gpu"],
+  });
   const context = await browser.newContext({
     storageState,
     proxy: proxy
