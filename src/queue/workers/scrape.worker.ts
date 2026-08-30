@@ -368,34 +368,22 @@ async function runScrape(
       return verdict;
     };
 
-    // Checked in groups of SCRAPE_ENRICH_BATCH_SIZE rather than in one pass across every
-    // candidate: check a batch, save whatever in it matches, then move to the next batch. Each
-    // profile inside a batch is still visited and saved one at a time exactly as before — this is
-    // a grouping over that same sequential walk, not a different collection or matching strategy.
-    const filterMatches = hasResultFilter(data.resultFilter) ? buildFilterPredicate(data.resultFilter) : null;
-    let enrichedCount = 0;
+    let enriched: RawLead[];
     try {
-      for (let start = 0; start < candidates.length; start += env.SCRAPE_ENRICH_BATCH_SIZE) {
-        // How many more matches this run still needs. Recomputed before every batch (not just
-        // once) so the run never overshoots capLeads by saving extra matches out of a batch that
-        // happened to contain more hits than were still needed.
-        const remaining = filterMatches ? data.capLeads - sink.saved : Infinity;
-        if (filterMatches && remaining <= 0) break;
-        if (enrichStoppedEarly) break;
-
-        const batch = candidates.slice(start, start + env.SCRAPE_ENRICH_BATCH_SIZE);
-        const batchEnriched = await enrichLeadsFromProfiles(page, batch, {
-          minDelayMs: env.PROFILE_DELAY_MIN_MS,
-          maxDelayMs: env.PROFILE_DELAY_MAX_MS,
-          rateLimitTolerance: env.RATE_LIMIT_TOLERANCE,
-          rateLimitBackoffMs: env.RATE_LIMIT_BACKOFF_MS,
-          navTimeoutMs: env.SCRAPE_NAV_TIMEOUT_MS,
-          checkpoint: enrichCheckpoint,
-          onEnriched: (lead, matched) => sink.accept(lead, matched),
-          ...(filterMatches ? { target: { matches: filterMatches, count: remaining } } : {}),
-        });
-        enrichedCount += batchEnriched.length;
-      }
+      enriched = await enrichLeadsFromProfiles(page, candidates, {
+        minDelayMs: env.PROFILE_DELAY_MIN_MS,
+        maxDelayMs: env.PROFILE_DELAY_MAX_MS,
+        rateLimitTolerance: env.RATE_LIMIT_TOLERANCE,
+        rateLimitBackoffMs: env.RATE_LIMIT_BACKOFF_MS,
+        navTimeoutMs: env.SCRAPE_NAV_TIMEOUT_MS,
+        checkpoint: enrichCheckpoint,
+        onEnriched: (lead, matched) => sink.accept(lead, matched),
+        // With a filter on the job, aim for capLeads *matching* leads out of the larger candidate
+        // pool collected above; the enricher stops as soon as it has them.
+        ...(hasResultFilter(data.resultFilter)
+          ? { target: { matches: buildFilterPredicate(data.resultFilter), count: data.capLeads } }
+          : {}),
+      });
     } catch (err) {
       // Every lead read before this point is already saved (sink.accept writes as it goes), so
       // there is nothing left to rescue here — the count on the error is what the job reports.
@@ -413,7 +401,7 @@ async function runScrape(
     // `{minFollowers: 0}` — what the form produces from a "0" in min followers — is a deliberate
     // no-op bound that every un-enriched lead passes.)
     let unenriched = 0;
-    const unvisited = enrichStoppedEarly ? candidates.slice(enrichedCount) : [];
+    const unvisited = enrichStoppedEarly ? candidates.slice(enriched.length) : [];
     if (unvisited.length > 0) {
       try {
         unenriched = await sink.acceptRemainder(unvisited);

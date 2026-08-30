@@ -40,12 +40,6 @@ const envSchema = z.object({
   // filtering the first N accounts in the list down to a handful. Raising it finds more matches in
   // one run at the cost of proportionally more requests to X — see scrape.worker.ts#candidateCapFor.
   SCRAPE_FILTER_CANDIDATE_MULTIPLIER: z.coerce.number().int().min(1).max(20).default(5),
-  // The profile-checking pass works through its collected candidates in groups of this many:
-  // check a batch, save whatever in it matches, then move to the next batch — rather than one
-  // single pass across every candidate. Purely a pacing/grouping knob over the same sequential,
-  // one-profile-at-a-time visits (each still saved the moment it's read); it does not change what
-  // gets collected or how many leads a run ends up with. See scrape.worker.ts#runScrape.
-  SCRAPE_ENRICH_BATCH_SIZE: z.coerce.number().int().min(1).max(50).default(5),
   // Wall-clock budget for a single scrape run, measured from the moment the browser opens.
   // The lead cap is the only other bound a run has, and on a big target that bound never arrives:
   // a busy reply thread or a large followers list keeps serving more accounts, so "collect 20
