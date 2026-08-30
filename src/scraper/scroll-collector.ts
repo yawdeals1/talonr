@@ -167,8 +167,10 @@ export async function scrollAndCollect(source: ScrapeSource, ctx: ScrapeSourceCo
     if ((await openListPage(source, ctx)) === "stopped") return collected();
 
     let stagnantRounds = 0;
+    let round = 0;
 
     while (seen.size < ctx.capLeads && stagnantRounds < MAX_STAGNANT_ROUNDS) {
+      round += 1;
       // Checked before the round's work, not after, so a stopped run does at most one more scroll.
       // A cancel throws here and the catch below carries the collected leads out as partials; a
       // "finish" just ends the search, leaving what's collected to be enriched and saved.
@@ -211,6 +213,17 @@ export async function scrollAndCollect(source: ScrapeSource, ctx: ScrapeSourceCo
         if (!seen.has(key)) seen.set(key, item);
       }
       stagnantRounds = seen.size === before ? stagnantRounds + 1 : 0;
+      // Diagnostic only — off by default (info level in production). A clean stagnation (nothing
+      // logged, run just ends 4 rounds early) is otherwise silent: neither a rate limit nor a
+      // transient error, the two paths that already log, is involved. This is what distinguishes
+      // "the page keeps handing back the same handful of cells" (itemsThisRound stays flat, close to
+      // newThisRound) from "the page hands back plenty of cells but they're mostly ones we've already
+      // seen" (itemsThisRound stays high while newThisRound drops toward 0) — two different failures
+      // that look identical from the outside (leadsFound comes up short) but point at different code.
+      logger.debug(
+        { sourceRef: ctx.sourceRef, round, itemsThisRound: items.length, newThisRound: seen.size - before, totalSeen: seen.size, stagnantRounds },
+        "scroll round complete"
+      );
       ctx.onProgress?.(seen.size);
 
       if (seen.size >= ctx.capLeads) break;
