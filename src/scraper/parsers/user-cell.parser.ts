@@ -34,28 +34,23 @@ export async function extractUserCells(
     const root: ParentNode = document.querySelector('[data-testid="primaryColumn"]') ?? document;
     const excludedSet = new Set(excluded);
 
-    // Recommendation modules aren't uniquely testid'd, so they're identified two ways, both
-    // deliberately conservative — a miss just keeps the cell, which is the pre-existing behaviour,
-    // whereas an over-match would silently discard real leads.
-    //   1. an ancestor carrying a recommendation aria-label (the sidebar panel and X's labelled
-    //      in-timeline carousels), and
-    //   2. anything rendered after an in-timeline recommendation heading, since X appends those
-    //      blocks as siblings of the real list rather than nesting them in a labelled container.
+    // Recommendation modules aren't uniquely testid'd, so they're identified by an ancestor
+    // carrying a recommendation aria-label — the sidebar panel and X's labelled in-timeline
+    // carousels both wrap their cells in such a container. Deliberately conservative: a miss just
+    // keeps the cell, which is the pre-existing behaviour, whereas an over-match would silently
+    // discard real leads.
+    //
+    // Unlike tweet-author.parser.ts's "Discover more" block — which is genuinely terminal, the last
+    // thing on a finished thread — a followers/search list is an endless scroll, and X splices an
+    // interstitial "You might also follow" card mid-list on large accounts while real followers keep
+    // rendering below it as the run scrolls further. A "everything after this heading" rule (as
+    // tweet-author.parser.ts uses) would discard every one of those later, genuine followers for the
+    // rest of the run — which is what silently stalled a 64.7K-follower account at 6 collected leads
+    // before the stagnant-round counter gave up. Only the ancestor check is safe here.
     const SUGGESTION_LABEL = /who to follow|you might like|suggested for you|discover more|recommended/i;
-
-    const boundaryHeading = Array.from(root.querySelectorAll('[role="heading"], h1, h2, h3')).find(
-      (heading) => SUGGESTION_LABEL.test(heading.textContent ?? "")
-    );
 
     function inSuggestionModule(cell: Element): boolean {
       if (cell.closest('[data-testid="sidebarColumn"]')) return true;
-
-      if (
-        boundaryHeading &&
-        boundaryHeading.compareDocumentPosition(cell) & Node.DOCUMENT_POSITION_FOLLOWING
-      ) {
-        return true;
-      }
 
       for (let node: Element | null = cell, depth = 0; node && depth < 10; depth += 1, node = node.parentElement) {
         const label = node.getAttribute("aria-label");
