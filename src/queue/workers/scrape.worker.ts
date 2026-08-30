@@ -186,6 +186,7 @@ function createLeadSink(data: ScrapeJobData) {
   let collected = 0;
   let checked = 0;
   let saved = 0;
+  let failed = 0;
   let phase: "collecting" | "checking" = "collecting";
   let lastReportAt = 0;
 
@@ -209,6 +210,9 @@ function createLeadSink(data: ScrapeJobData) {
     get saved() {
       return saved;
     },
+    get failed() {
+      return failed;
+    },
     keeps(lead: RawLead): boolean {
       return !matches || matches(lead);
     },
@@ -221,12 +225,34 @@ function createLeadSink(data: ScrapeJobData) {
       collected = count;
       void report(true);
     },
-    /** Saves one freshly-read lead if it belongs in the results, then republishes the counters. */
+    /**
+     * Saves one freshly-read lead if it belongs in the results, then republishes the counters.
+     *
+     * A single Studio DB hiccup on this one lead's GET-then-insert/update call used to propagate
+     * straight out of here into `enrichLeadsFromProfiles`'s "could not save lead mid-run; continuing"
+     * catch, which only logs a warning and moves on — the lead was gone for good, `saved` never
+     * incremented, and the finished job showed a plain, unexplained "9 of 10" with no error anywhere
+     * a user could see. One retry clears a transient blip; if it still fails, the miss is at least
+     * counted so the job can say why it came up short instead of silently reporting a lower number.
+     */
     async accept(lead: RawLead, matched: boolean): Promise<void> {
       checked += 1;
       if (matched) {
-        await persistLeads(data, [lead]);
-        saved += 1;
+        try {
+          await persistLeads(data, [lead]);
+          saved += 1;
+        } catch {
+          try {
+            await persistLeads(data, [lead]);
+            saved += 1;
+          } catch (err) {
+            failed += 1;
+            logger.warn(
+              { err, scrapeJobId: data.scrapeJobId, handle: lead.handle },
+              "could not save a matched lead after retrying; it is missing from this run's results"
+            );
+          }
+        }
       }
       await report();
     },
@@ -342,22 +368,34 @@ async function runScrape(
       return verdict;
     };
 
-    let enriched: RawLead[];
+    // Checked in groups of SCRAPE_ENRICH_BATCH_SIZE rather than in one pass across every
+    // candidate: check a batch, save whatever in it matches, then move to the next batch. Each
+    // profile inside a batch is still visited and saved one at a time exactly as before — this is
+    // a grouping over that same sequential walk, not a different collection or matching strategy.
+    const filterMatches = hasResultFilter(data.resultFilter) ? buildFilterPredicate(data.resultFilter) : null;
+    let enrichedCount = 0;
     try {
-      enriched = await enrichLeadsFromProfiles(page, candidates, {
-        minDelayMs: env.PROFILE_DELAY_MIN_MS,
-        maxDelayMs: env.PROFILE_DELAY_MAX_MS,
-        rateLimitTolerance: env.RATE_LIMIT_TOLERANCE,
-        rateLimitBackoffMs: env.RATE_LIMIT_BACKOFF_MS,
-        navTimeoutMs: env.SCRAPE_NAV_TIMEOUT_MS,
-        checkpoint: enrichCheckpoint,
-        onEnriched: (lead, matched) => sink.accept(lead, matched),
-        // With a filter on the job, aim for capLeads *matching* leads out of the larger candidate
-        // pool collected above; the enricher stops as soon as it has them.
-        ...(hasResultFilter(data.resultFilter)
-          ? { target: { matches: buildFilterPredicate(data.resultFilter), count: data.capLeads } }
-          : {}),
-      });
+      for (let start = 0; start < candidates.length; start += env.SCRAPE_ENRICH_BATCH_SIZE) {
+        // How many more matches this run still needs. Recomputed before every batch (not just
+        // once) so the run never overshoots capLeads by saving extra matches out of a batch that
+        // happened to contain more hits than were still needed.
+        const remaining = filterMatches ? data.capLeads - sink.saved : Infinity;
+        if (filterMatches && remaining <= 0) break;
+        if (enrichStoppedEarly) break;
+
+        const batch = candidates.slice(start, start + env.SCRAPE_ENRICH_BATCH_SIZE);
+        const batchEnriched = await enrichLeadsFromProfiles(page, batch, {
+          minDelayMs: env.PROFILE_DELAY_MIN_MS,
+          maxDelayMs: env.PROFILE_DELAY_MAX_MS,
+          rateLimitTolerance: env.RATE_LIMIT_TOLERANCE,
+          rateLimitBackoffMs: env.RATE_LIMIT_BACKOFF_MS,
+          navTimeoutMs: env.SCRAPE_NAV_TIMEOUT_MS,
+          checkpoint: enrichCheckpoint,
+          onEnriched: (lead, matched) => sink.accept(lead, matched),
+          ...(filterMatches ? { target: { matches: filterMatches, count: remaining } } : {}),
+        });
+        enrichedCount += batchEnriched.length;
+      }
     } catch (err) {
       // Every lead read before this point is already saved (sink.accept writes as it goes), so
       // there is nothing left to rescue here — the count on the error is what the job reports.
@@ -375,7 +413,7 @@ async function runScrape(
     // `{minFollowers: 0}` — what the form produces from a "0" in min followers — is a deliberate
     // no-op bound that every un-enriched lead passes.)
     let unenriched = 0;
-    const unvisited = enrichStoppedEarly ? candidates.slice(enriched.length) : [];
+    const unvisited = enrichStoppedEarly ? candidates.slice(enrichedCount) : [];
     if (unvisited.length > 0) {
       try {
         unenriched = await sink.acceptRemainder(unvisited);
@@ -455,14 +493,22 @@ export function startScrapeWorker(): Worker<ScrapeJobData> {
         // one, "20 requested, 6 found" is indistinguishable from a target that only had 6 matching
         // accounts in it, and a full-looking count of leads with no profile details behind it
         // looks like a clean success.
-        const shortfallNote = timedOut
-          ? (describeRunLimitStop({
+        const timeoutNote = timedOut
+          ? describeRunLimitStop({
               budgetMinutes: env.SCRAPE_MAX_RUN_MINUTES,
               leadsFound,
               capLeads: job.data.capLeads,
               unenriched,
-            }) ?? undefined)
-          : undefined;
+            })
+          : null;
+        // A lead that matched but couldn't be saved after a retry is a second, independent reason
+        // the count can come up short of what was asked for — distinct from running out of clock,
+        // and just as invisible to the user if it isn't said out loud here.
+        const failedNote =
+          sink.failed > 0
+            ? `${sink.failed} matching lead${sink.failed === 1 ? "" : "s"} could not be saved after a retry — a database error, not a shortage of matches. Run it again to pick ${sink.failed === 1 ? "it" : "them"} up.`
+            : null;
+        const shortfallNote = [timeoutNote, failedNote].filter(Boolean).join(" ") || undefined;
         await markJobStatus(scrapeJobId, "completed", shortfallNote, { finishedAt: new Date(), leadsFound });
         await touchAccountLastUsed(xAccountId);
         await logActivity(job.data.userId, "scrape.completed", {
