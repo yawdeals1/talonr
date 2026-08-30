@@ -31,7 +31,14 @@ function throttlePattern(counts: number[]) {
 function fakePage(): Page {
   return {
     goto: vi.fn(async () => null),
-    mouse: { wheel: vi.fn(async () => undefined) },
+    viewportSize: vi.fn(() => ({ width: 1280, height: 720 })),
+    locator: vi.fn(() => ({
+      first: () => ({ boundingBox: vi.fn(async () => ({ x: 300, y: 0, width: 600, height: 720 })) }),
+    })),
+    mouse: {
+      move: vi.fn(async () => undefined),
+      wheel: vi.fn(async () => undefined),
+    },
   } as unknown as Page;
 }
 
@@ -155,6 +162,25 @@ describe("scrollAndCollect stop handling", () => {
 
     expect(page.goto).toHaveBeenCalledTimes(1);
     expect(leads).toHaveLength(2);
+  });
+});
+
+describe("scrollAndCollect timeline scrolling", () => {
+  beforeEach(() => {
+    detectors.watchForRateLimitResponses.mockReturnValue(throttlePattern([0]));
+  });
+
+  it("targets the primary timeline before wheeling and advances in viewport-sized steps", async () => {
+    const page = fakePage();
+
+    await scrollAndCollect(countingSource(), context(page));
+
+    const move = page.mouse.move as unknown as ReturnType<typeof vi.fn>;
+    const wheel = page.mouse.wheel as unknown as ReturnType<typeof vi.fn>;
+    expect(move).toHaveBeenCalledWith(600, 360);
+    expect(move.mock.invocationCallOrder[0]).toBeLessThan(wheel.mock.invocationCallOrder[0]!);
+    expect(wheel.mock.calls[0]![1]).toBeGreaterThanOrEqual(600);
+    expect(wheel.mock.calls[0]![1]).toBeLessThanOrEqual(720);
   });
 });
 

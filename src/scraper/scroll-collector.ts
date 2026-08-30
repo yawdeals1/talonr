@@ -23,6 +23,9 @@ const DEFAULT_RATE_LIMIT_BACKOFF_MS = 20_000;
 // Longest a back-off sleeps before asking the checkpoint whether the run is still wanted, so a
 // cancel lands within seconds even while the run is waiting out a throttle.
 const BACKOFF_SLICE_MS = 5_000;
+// One modest viewport at a time keeps X's bottom-of-timeline loading sentinel in view long enough
+// to request the next page. The old 2,200â€“3,000px jump could leap straight past it.
+const MIN_SCROLL_DISTANCE_PX = 600;
 
 function randomDelay(minMs: number, maxMs: number): Promise<void> {
   const delay = minMs + Math.random() * (maxMs - minMs);
@@ -31,6 +34,34 @@ function randomDelay(minMs: number, maxMs: number): Promise<void> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Advances X's virtualized primary timeline with the wheel targeted at the timeline itself.
+ *
+ * Playwright's mouse begins at (0, 0), which is inside X's fixed navigation/header rather than the
+ * primary column. A wheel event is dispatched to the element under the pointer, so leaving it there
+ * made the initial SPA-prefetched follower batches appear (40, then 21 in a live failed run) but
+ * never advanced the list after that. Moving horizontally into the primary column before every
+ * wheel makes the event hit the timeline's scroll chain. The distance is based on the viewport so
+ * the infinite-scroll sentinel is crossed gradually instead of being skipped by a multi-screen
+ * jump.
+ */
+async function advanceTimeline(page: Page): Promise<void> {
+  const viewport = page.viewportSize();
+  const primaryColumn = page.locator('[data-testid="primaryColumn"]').first();
+  const box = await primaryColumn.boundingBox().catch(() => null);
+
+  if (box) {
+    const maxX = Math.max(1, (viewport?.width ?? box.x + box.width) - 1);
+    const x = Math.min(maxX, Math.max(1, box.x + box.width / 2));
+    const y = Math.max(1, Math.round((viewport?.height ?? 720) / 2));
+    await page.mouse.move(x, y);
+  }
+
+  const viewportHeight = viewport?.height ?? 800;
+  const distance = Math.max(MIN_SCROLL_DISTANCE_PX, viewportHeight * (0.8 + Math.random() * 0.2));
+  await page.mouse.wheel(0, distance);
 }
 
 /**
@@ -228,7 +259,7 @@ export async function scrollAndCollect(source: ScrapeSource, ctx: ScrapeSourceCo
 
       if (seen.size >= ctx.capLeads) break;
 
-      await ctx.page.mouse.wheel(0, 2200 + Math.random() * 800);
+      await advanceTimeline(ctx.page);
       await randomDelay(ctx.minScrollDelayMs, ctx.maxScrollDelayMs);
     }
   } catch (err) {
