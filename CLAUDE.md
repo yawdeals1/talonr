@@ -434,23 +434,18 @@ figure that would go stale on any deploy that overrides it.
   wrapped checkpoint is asked *first*, so a cancel that lands at the same moment still records as
   cancelled rather than as a timeout.
 - **Reading the list may spend at most half the budget** (`COLLECT_BUDGET_SHARE` in
-  `scrape.worker.ts`). Collection produces nothing on its own — a lead is only saved once its
-  profile has been read, and on a filtered run a lead with no follower count is dropped outright —
-  so letting it spend the whole clock would end a 20-minute run with zero saved leads. Collection
-  that finishes sooner hands its unused time to enrichment, which runs against the whole-run
-  deadline.
+  `scrape.worker.ts`). Collection produces nothing on its own — a lead is saved after its profile
+  has been read, or rescued with raw list data if the run is cut short — so letting collection
+  spend the whole clock would leave no time for useful profile data. Collection that finishes
+  sooner hands its unused time to enrichment, which runs against the whole-run deadline.
 - **Leads collected but never reached are saved when the run was *stopped*, and only then.** The
   enricher visits candidates in order and returns only those it reached, so the worker hands
   `rawLeads.slice(enriched.length)` to the same sink (`acceptRemainder`). This is gated on the
   enrichment checkpoint having answered `"finish"` — the user or the clock — **not** on the
   enricher having returned fewer leads than it was given, because it also returns early on the
   happy path: a filtered run stops the moment it has its `capLeads` matches, and the candidates it
-  skipped are exactly the ones it deliberately didn't need. Dumping those would put the whole
-  unfiltered candidate pool into the results of a run whose point was to narrow it.
-  `acceptRemainder`'s keep rule is not a sufficient guard on its own — a filter of
-  `{minFollowers: 0}`, which the form produces from a "0" in min followers, is a deliberate no-op
-  bound (see `buildFilterPredicate`) that every un-enriched lead passes. Gating it correctly also
-  fixed "Finish now" mid-enrichment silently throwing away the rest of the collected list.
+  skipped are profiles it never needed to visit. Gating the remainder on an actual stop also fixed
+  "Finish now" mid-enrichment silently throwing away the rest of the collected list.
 - A run the clock cut short records a note on the **completed** job (`errorMessage`, rendered as a
   note rather than an error in `ScrapeJobDetail.tsx`) — see "A short run says why" below, which
   covers the clock alongside every other bound. `isCancelledJob` still only matches `failed` + the
@@ -468,8 +463,6 @@ note from what the run actually did:
   any further — the end of the list, so there is nothing more to get) versus `"stalled"` (the page
   kept scrolling but returned no new accounts — X declining to serve more, so running it again
   later is worth doing). Same symptom, opposite advice;
-- **verified-only** dropping candidates before the profile pass, which is invisible in the saved
-  count because it happens before a single profile is visited;
 - **the filter** matching fewer of the profiles read than were asked for ("100 profiles checked,
   4 matched your filter");
 - **already-collected accounts** a resumed/continued run scrolled past;
@@ -538,28 +531,22 @@ keyed by lowercased handle, `page.mouse.wheel` scroll, random delay from
 unique profile sequentially using `PROFILE_DELAY_MIN_MS`/`PROFILE_DELAY_MAX_MS`, merges bio,
 followers, location, verification, and avatar, then the worker upserts the complete leads.
 
-**A job's result filter steers the run, and decides what the run keeps.** When
+**A job's result filter steers the run and controls its read-time view.** When
 `POST /scrapes` carried a `resultFilterDefinition`, it rides on the BullMQ job (`ScrapeJobData`'s
 `resultFilter`) and `scrape.worker.ts` collects a *candidate pool* of
 `capLeads × SCRAPE_FILTER_CANDIDATE_MULTIPLIER` (hard-capped at 1000) instead of `capLeads`, then
 hands `enrichLeadsFromProfiles` a `target` so it stops as soon as `capLeads` enriched leads match.
-**A filtered run saves only the leads that match** (`scrape.worker.ts#createLeadSink`) — the one
-deliberate exception to "scrapes write unfiltered". It has to check several candidates per lead it
-wants, and writing the rejects too put 300k-follower accounts into the leads list of someone who
-asked for 100–2000, which is the whole thing the filter exists to prevent. A run *without* a filter
-still saves every profile it reads, so the "one scrape, many filter iterations" property holds
-wherever the user hasn't already committed to a range. Leads cut short during collection have no
-follower count yet, so a filtered run keeps none of them: an unverified lead can't be claimed to
-match. The multiplier is the bound that stops this becoming an unbounded crawl.
+**Every checked candidate is saved unfiltered and added to the scrape's exact membership.** The
+stored result filter is applied by `/scrapes/:id/leads` at read time, while the worker's matching
+counter controls when the run has found enough requested results. This preserves the core "one
+scrape, many filter iterations" model and lets a continued run skip rejected candidates instead of
+revisiting the same first page forever. The multiplier is the bound that stops a selective filter
+from becoming an unbounded crawl.
 
-**`verifiedOnly` is the one bound applied before the profile pass, not after it.** X draws the same
-`svg[data-testid="icon-verified"]` badge on a `UserCell` that it draws on a profile header, so both
-list parsers already read it during collection — the profile visit would check the identical node
-and learn nothing new. `scrape.worker.ts#runScrape` therefore drops unverified candidates straight
-after collection, which is what keeps a verified-only run from spending its clock, and its request
-budget against X, on profiles it was always going to discard. Follower counts and locations are
-knowable only from the profile, so they stay where they are: judged after the visit. It is also the
-only filter that still works on a lead whose enrichment came back empty.
+**`verifiedOnly` is evaluated after the profile visit.** X can omit or change the verification
+badge in virtualized list cells independently of the profile header. Treating the list cell as
+authoritative caused healthy runs to report candidates found but zero profiles checked. The list
+badge remains useful preliminary data, but the enriched profile value is the filter verdict.
 
 **Leads are written one at a time, as the run reads them**, not in a single batch at the end, and
 the worker republishes counters (`saveScrapeProgress`, at most every 3s) into the result store as

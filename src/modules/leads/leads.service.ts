@@ -71,6 +71,9 @@ export async function upsertLeads(
         bio: lead.bio ?? existing.bio,
         followers: lead.followers ?? existing.followers,
         location: lead.location ?? existing.location,
+        // A missing badge can mean X changed or incompletely rendered its markup. Preserve a
+        // verification we previously observed instead of letting a best-effort scrape erase it.
+        verified: lead.verified || existing.verified,
         profileImage: lead.profileImage ?? existing.profileImage,
         lastSeenAt: new Date(),
       });

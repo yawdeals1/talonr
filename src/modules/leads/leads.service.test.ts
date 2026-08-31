@@ -198,6 +198,30 @@ describe("upsertLeads profile-data preservation", () => {
     );
   });
 
+  it("does not erase a previously observed verification when the badge is missing", async () => {
+    const existing: Lead = { ...ownedLead, verified: true };
+    studioList.mockResolvedValue({ rows: [existing] });
+    studioUpdate.mockResolvedValue(existing);
+
+    await upsertLeads(OWNER, "followers", "OpenSourceOrg", [
+      {
+        handle: existing.handle,
+        displayName: existing.displayName,
+        bio: null,
+        followers: null,
+        location: null,
+        verified: false,
+        profileImage: null,
+      },
+    ]);
+
+    expect(studioUpdate).toHaveBeenCalledWith(
+      "leads",
+      existing.id,
+      expect.objectContaining({ verified: true })
+    );
+  });
+
   it("still applies freshly scraped profile data over the stored values", async () => {
     const existing: Lead = { ...ownedLead, followers: 5_000, location: "Accra, Ghana" };
     studioList.mockResolvedValue({ rows: [existing] });

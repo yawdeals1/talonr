@@ -107,9 +107,8 @@ async function persistLeads(data: ScrapeJobData, leads: RawLead[]): Promise<numb
  * Enrichment is deliberately skipped: the run was stopped because X pushed back, and visiting one
  * profile per lead is the last thing to do in that state. `upsertLeads` merges rather than
  * overwrites, so the missing profile fields stay whatever a previous scrape put on file and get
- * filled in on the next successful run. On a filtered job these leads have no follower count yet,
- * so the sink keeps none of them — an unverified lead can't be claimed to match the range the user
- * asked for.
+ * filled in on the next successful run. These partials are still persisted and recorded as exact
+ * members of the scrape; the saved result filter decides whether they are visible at read time.
  */
 async function savePartialLeads(data: ScrapeJobData, sink: LeadSink, err: unknown): Promise<void> {
   const partial = getPartialLeads(err);
@@ -146,8 +145,8 @@ function candidateCapFor(data: ScrapeJobData): number {
 
 function hasResultFilter(filter: ScrapeResultFilter | undefined): filter is ScrapeResultFilter {
   // `false` and `""` are how the form says "not set" for the non-numeric bounds, and a filter of
-  // nothing must not put the run on the filtered path — that one collects five times the candidates
-  // and saves only what matches, which is a lot of extra requests to X to enforce no bound at all.
+  // nothing must not put the run on the filtered path — that one collects five times the candidates,
+  // which is a lot of extra requests to X to enforce no bound at all.
   return !!filter && Object.values(filter).some((value) => value !== undefined && value !== false && value !== "");
 }
 
@@ -160,8 +159,8 @@ const MAX_CANDIDATE_LEADS = 1000;
  * over to the profile pass.
  *
  * Reading the list produces nothing on its own — a lead is only saved once its profile has been
- * read, and on a filtered run a lead with no follower count is dropped outright — so collection
- * must never be able to spend the whole budget. On a target with no natural end (a large followers
+ * read (or the run is cut short and its raw partials are rescued) — so collection must never be
+ * able to spend the whole budget. On a target with no natural end (a large followers
  * list, a reply thread thousands deep) it otherwise would: the scroll loop only stops at the
  * candidate cap or four stagnant rounds, and neither arrives. Half leaves the profile pass, which
  * is the slower half per lead, a real share of the clock. Collection that ends sooner hands its
@@ -201,15 +200,15 @@ function mergeCollectionReasons(reasons: CollectionStopReason[]): CollectionStop
 const PROGRESS_REPORT_INTERVAL_MS = 3_000;
 
 /**
- * Collects the run's output as it happens: decides what to keep, writes it immediately, and
- * publishes counters the job page can read while the scrape is still going.
+ * Collects the run's output as it happens: writes every candidate immediately, records exact
+ * membership, and publishes counters the job page can read while the scrape is still going.
  *
  * Two deliberate behaviours live here. Leads are saved one at a time rather than in a single batch
  * at the end, so the job page fills in during the run instead of staying empty until it finishes.
- * And when the job carries a follower/location filter, only leads that *match* it are written — a
- * filtered run checks several candidates per lead it wants, and saving the rejects put accounts far
- * outside the requested range into the user's leads list, which is exactly what the filter was
- * supposed to prevent. Runs without a filter still save every profile they read.
+ * The database stays deliberately unfiltered: one scrape can support unlimited later filter
+ * changes, and a continued run must remember rejected candidates too or it will revisit the same
+ * first page forever. `saved` is therefore a display/target counter (matching persisted leads), not
+ * a gate in front of persistence. The scrape results endpoint applies the stored filter at read time.
  */
 function createLeadSink(data: ScrapeJobData) {
   const filter = hasResultFilter(data.resultFilter) ? data.resultFilter : null;
@@ -250,9 +249,6 @@ function createLeadSink(data: ScrapeJobData) {
     get failed() {
       return failed;
     },
-    keeps(lead: RawLead): boolean {
-      return !matches || matches(lead);
-    },
     noteCollected(count: number): void {
       collected = count;
       void report();
@@ -262,16 +258,16 @@ function createLeadSink(data: ScrapeJobData) {
      *
      * `collected` is deliberately left alone. It used to be overwritten with the number of
      * candidates about to be checked, which quietly erased the one number that says how much of the
-     * list was actually read — on a verified-only run, where most collected accounts are dropped
-     * before a single profile is visited, the panel showed the post-drop figure as though the list
-     * had only ever yielded that much.
+     * list was actually read. The profile pass must not overwrite that with a candidate subset or
+     * the panel would show the post-processing figure as though the list had only yielded that much.
      */
     startChecking(): void {
       phase = "checking";
       void report(true);
     },
     /**
-     * Saves one freshly-read lead if it belongs in the results, then republishes the counters.
+     * Saves one freshly-read lead, then republishes the counters. A filter controls only whether
+     * this lead advances the matching target; it never controls persistence or exact membership.
      *
      * A single Studio DB hiccup on this one lead's GET-then-insert/update call used to propagate
      * straight out of here into `enrichLeadsFromProfiles`'s "could not save lead mid-run; continuing"
@@ -282,31 +278,29 @@ function createLeadSink(data: ScrapeJobData) {
      */
     async accept(lead: RawLead, matched: boolean): Promise<void> {
       checked += 1;
-      if (matched) {
+      try {
+        const persisted = await persistLeads(data, [lead]);
+        if (matched) saved += persisted;
+      } catch {
         try {
-          await persistLeads(data, [lead]);
-          saved += 1;
-        } catch {
-          try {
-            await persistLeads(data, [lead]);
-            saved += 1;
-          } catch (err) {
-            failed += 1;
-            logger.warn(
-              { err, scrapeJobId: data.scrapeJobId, handle: lead.handle },
-              "could not save a matched lead after retrying; it is missing from this run's results"
-            );
-          }
+          const persisted = await persistLeads(data, [lead]);
+          if (matched) saved += persisted;
+        } catch (err) {
+          if (matched) failed += 1;
+          logger.warn(
+            { err, scrapeJobId: data.scrapeJobId, handle: lead.handle, matched },
+            "could not save lead after retrying; it is missing from this run's exact results"
+          );
         }
       }
       await report();
     },
-    /** Saves a batch left over from a run that was cut short, keeping the same filter rule. */
+    /** Saves every candidate left over from a run that was cut short, still counting only matches. */
     async acceptRemainder(leads: RawLead[]): Promise<number> {
-      const keep = matches ? leads.filter(matches) : leads;
-      if (keep.length === 0) return 0;
-      const count = await persistLeads(data, keep);
-      saved += count;
+      if (leads.length === 0) return 0;
+      const count = await persistLeads(data, leads);
+      const matchingCount = matches ? leads.filter(matches).length : count;
+      saved += matchingCount;
       await report(true);
       return count;
     },
@@ -330,8 +324,6 @@ interface RunOutcome {
   collected: number;
   /** Accounts an earlier run already had, which this one scrolled past without re-collecting. */
   skipped: number;
-  /** Collected accounts dropped before the profile pass because the run was verified-only. */
-  droppedUnverified: number;
   /** Why reading the list ended. */
   collectionReason: CollectionStopReason;
   /** Scroll rounds the list took. Logged, not shown: it is what separates "one round and done" —
@@ -436,14 +428,12 @@ async function runScrape(data: ScrapeJobData, sink: LeadSink): Promise<RunOutcom
       throw err;
     }
 
-    // Verified is the one bound that doesn't need a profile: X draws the same `icon-verified` badge
-    // on a UserCell as it does on a profile header, so the parsers already read it during
-    // collection. Dropping the rest here rather than after their visits is what keeps a
-    // "verified only" run from spending its whole clock — and its request budget against X — on
-    // profiles it was always going to discard. Follower counts and locations are only knowable from
-    // the profile, so they stay where they are: judged after the visit.
-    const candidates = data.resultFilter?.verifiedOnly ? rawLeads.filter((lead) => lead.verified) : rawLeads;
-    const droppedUnverified = rawLeads.length - candidates.length;
+    // Never trust the list cell as the final verification verdict. X changes this markup
+    // independently of the profile header and may omit the badge while virtualizing a long list.
+    // Pre-filtering here turned a healthy verified-only scrape into "60 found, 0 checked, 0 saved".
+    // Visit every candidate, merge the profile header, persist it unfiltered, and let the result
+    // predicate decide whether it advances the matching target.
+    const candidates = rawLeads;
 
     sink.startChecking();
 
@@ -485,12 +475,9 @@ async function runScrape(data: ScrapeJobData, sink: LeadSink): Promise<RunOutcom
     // The enricher stops early for three reasons, and only two of them mean "keep the rest".
     // Stopped by the user or the clock, the leads it never reached were collected and would
     // otherwise be thrown away, so they go to the sink with their list-view data. Stopped because
-    // it *found what it was asked for*, the leads it never reached are the candidates it
-    // deliberately didn't need — saving those would put the whole unfiltered candidate pool into
-    // the results of a run whose entire point was to narrow it, which is what the filter exists to
-    // prevent. (`acceptRemainder`'s keep rule is not a sufficient guard on its own: a filter of
-    // `{minFollowers: 0}` — what the form produces from a "0" in min followers — is a deliberate
-    // no-op bound that every un-enriched lead passes.)
+    // it *found what it was asked for*, the leads it never reached have not been checked and are not
+    // exact members of this run. They are saved only when the user or clock stopped enrichment
+    // early, preserving work the collector had already completed.
     let unenriched = 0;
     const unvisited = enrichStoppedEarly ? candidates.slice(enriched.length) : [];
     if (unvisited.length > 0) {
@@ -511,7 +498,6 @@ async function runScrape(data: ScrapeJobData, sink: LeadSink): Promise<RunOutcom
       paused: pauseRequested,
       collected: rawLeads.length,
       skipped,
-      droppedUnverified,
       collectionReason,
       rounds,
     };
@@ -590,7 +576,6 @@ export function startScrapeWorker(): Worker<ScrapeJobData> {
           leadsFound,
           collected: outcome.collected,
           checked: sink.checked,
-          droppedUnverified: outcome.droppedUnverified,
           skipped: outcome.skipped,
           collectionReason: outcome.collectionReason,
           filtered: hasResultFilter(job.data.resultFilter),

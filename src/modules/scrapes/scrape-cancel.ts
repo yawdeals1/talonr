@@ -145,8 +145,6 @@ export interface ScrapeOutcomeSummary {
   collected: number;
   /** Profiles actually visited. */
   checked: number;
-  /** Collected accounts dropped before the profile pass because the run was verified-only. */
-  droppedUnverified: number;
   /** Accounts an earlier run already had, which a resumed/continued run scrolled past. */
   skipped: number;
   /** Why reading the list ended. */
@@ -188,7 +186,6 @@ export function describeScrapeOutcome(summary: ScrapeOutcomeSummary): string | n
     leadsFound,
     collected,
     checked,
-    droppedUnverified,
     skipped,
     collectionReason,
     filtered,
@@ -220,13 +217,6 @@ export function describeScrapeOutcome(summary: ScrapeOutcomeSummary): string | n
 
   if (skipped > 0) {
     parts.push(`${plural(skipped, "account")} already collected by an earlier run ${skipped === 1 ? "was" : "were"} scrolled past.`);
-  }
-
-  if (droppedUnverified > 0) {
-    parts.push(
-      `${plural(droppedUnverified, "collected account")} ${droppedUnverified === 1 ? "was" : "were"} not verified and ` +
-        "so dropped before the profile pass."
-    );
   }
 
   if (short && filtered && checked > leadsFound) {

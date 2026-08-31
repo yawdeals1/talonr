@@ -162,7 +162,6 @@ describe("describeScrapeOutcome", () => {
     leadsFound: 20,
     collected: 20,
     checked: 20,
-    droppedUnverified: 0,
     skipped: 0,
     collectionReason: "cap" as const,
     filtered: false,
@@ -202,20 +201,6 @@ describe("describeScrapeOutcome", () => {
 
     expect(note).toContain("X stopped serving more of the list after 40 accounts");
     expect(note).toContain("Run it again later");
-  });
-
-  it("reports the verified-only drop, which happens before a single profile is visited", () => {
-    const note = describeScrapeOutcome({
-      ...base,
-      leadsFound: 3,
-      collected: 120,
-      checked: 3,
-      droppedUnverified: 117,
-      filtered: true,
-      collectionReason: "cap",
-    });
-
-    expect(note).toContain("117 collected accounts were not verified");
   });
 
   it("separates profiles checked from leads matched on a filtered run", () => {
