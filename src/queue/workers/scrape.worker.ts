@@ -9,14 +9,16 @@ import { upsertLeads } from "../../modules/leads/leads.service.js";
 import {
   CANCELLED_ERROR_MESSAGE,
   createRunCheckpoint,
-  describeRunLimitStop,
+  describeScrapeOutcome,
   isCancelledJob,
   withRunDeadline,
 } from "../../modules/scrapes/scrape-cancel.js";
 import {
   clearScrapeFinishRequest,
+  clearScrapePauseRequest,
   saveScrapeJobLeadIds,
   saveScrapeProgress,
+  saveScrapeResumeAt,
 } from "../../modules/scrapes/scrape-results.service.js";
 import { closeScrapeSession, launchScrapeSession } from "../../scraper/browser.js";
 import { enrichLeadsFromProfiles } from "../../scraper/profile-enricher.js";
@@ -33,6 +35,7 @@ import {
   isScrapeCancelledError,
   RateLimitedError,
   setPartialLeadsSaved,
+  type CollectionStopReason,
   type RawLead,
   type ScrapeSource,
 } from "../../scraper/types.js";
@@ -166,6 +169,34 @@ const MAX_CANDIDATE_LEADS = 1000;
  */
 const COLLECT_BUDGET_SHARE = 0.5;
 
+/**
+ * A wait, in words a person can act on.
+ *
+ * The alternative it replaced was an ISO timestamp printed into the job's error message, which is
+ * both unreadable at a glance and wrong within a minute of being written. The exact moment is
+ * carried as data (`resumeAt`) for the job page to count down to; this is the sentence's share.
+ */
+function describeMinutes(until: Date): string {
+  const minutes = Math.max(1, Math.round((until.getTime() - Date.now()) / 60_000));
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  const hours = Math.round((minutes / 60) * 10) / 10;
+  return `${hours} hour${hours === 1 ? "" : "s"}`;
+}
+
+/**
+ * The single verdict for an "engagers" run, which reads two lists through the collector.
+ *
+ * Worst-first: an ending that owes the user an explanation must not be hidden by the other
+ * strategy having finished tidily.
+ */
+function mergeCollectionReasons(reasons: CollectionStopReason[]): CollectionStopReason {
+  const order: CollectionStopReason[] = ["stopped", "stalled", "exhausted", "cap"];
+  for (const candidate of order) {
+    if (reasons.includes(candidate)) return candidate;
+  }
+  return "cap";
+}
+
 /** How often a running job republishes its counters. */
 const PROGRESS_REPORT_INTERVAL_MS = 3_000;
 
@@ -210,6 +241,12 @@ function createLeadSink(data: ScrapeJobData) {
     get saved() {
       return saved;
     },
+    get checked() {
+      return checked;
+    },
+    get collected() {
+      return collected;
+    },
     get failed() {
       return failed;
     },
@@ -220,9 +257,17 @@ function createLeadSink(data: ScrapeJobData) {
       collected = count;
       void report();
     },
-    startChecking(count: number): void {
+    /**
+     * Moves the run into its profile pass.
+     *
+     * `collected` is deliberately left alone. It used to be overwritten with the number of
+     * candidates about to be checked, which quietly erased the one number that says how much of the
+     * list was actually read — on a verified-only run, where most collected accounts are dropped
+     * before a single profile is visited, the panel showed the post-drop figure as though the list
+     * had only ever yielded that much.
+     */
+    startChecking(): void {
       phase = "checking";
-      collected = count;
       void report(true);
     },
     /**
@@ -275,10 +320,26 @@ type LeadSink = ReturnType<typeof createLeadSink>;
  * that stopped on time rather than on the leads it was asked for needs to say so, and so does one
  * whose profile pass didn't reach everything it had collected.
  */
-async function runScrape(
-  data: ScrapeJobData,
-  sink: LeadSink
-): Promise<{ leadsFound: number; timedOut: boolean; unenriched: number }> {
+interface RunOutcome {
+  leadsFound: number;
+  timedOut: boolean;
+  unenriched: number;
+  /** The user asked for this run to stop but stay resumable. */
+  paused: boolean;
+  /** Unique accounts read off the list view, before any filtering. */
+  collected: number;
+  /** Accounts an earlier run already had, which this one scrolled past without re-collecting. */
+  skipped: number;
+  /** Collected accounts dropped before the profile pass because the run was verified-only. */
+  droppedUnverified: number;
+  /** Why reading the list ended. */
+  collectionReason: CollectionStopReason;
+  /** Scroll rounds the list took. Logged, not shown: it is what separates "one round and done" —
+   * the scroll never landing — from "forty rounds that each returned the same cells". */
+  rounds: number;
+}
+
+async function runScrape(data: ScrapeJobData, sink: LeadSink): Promise<RunOutcome> {
   const account = await studioGet<XAccount>("x_accounts", data.xAccountId);
   if (!account) throw new Error(`X account ${data.xAccountId} not found`);
   if (!account.encryptedSession) {
@@ -312,7 +373,22 @@ async function runScrape(
       );
     };
 
-    const checkpoint = createRunCheckpoint(data.userId, data.scrapeJobId);
+    // A pause is answered exactly like "Finish now" everywhere downstream — stop looking, keep
+    // everything found — and differs only in how the job ends: paused and resumable rather than
+    // done. Translating it here rather than teaching the scraper modules a third verdict keeps them
+    // free of any notion of what a job's statuses are.
+    let pauseRequested = false;
+    const rawCheckpoint = createRunCheckpoint(data.userId, data.scrapeJobId);
+    const checkpoint = async (): Promise<"continue" | "finish"> => {
+      const verdict = await rawCheckpoint();
+      if (verdict === "pause") {
+        pauseRequested = true;
+        return "finish";
+      }
+      return verdict;
+    };
+
+    const skipHandles = new Set((data.skipHandles ?? []).map((handle) => handle.toLowerCase()));
     const collectOpts = {
       page,
       sourceRef: data.sourceRef,
@@ -324,9 +400,13 @@ async function runScrape(
       navTimeoutMs: env.SCRAPE_NAV_TIMEOUT_MS,
       checkpoint: withRunDeadline(checkpoint, collectDeadlineAt, noteTimeout("collecting")),
       onProgress: (count: number) => sink.noteCollected(count),
+      skipHandles,
     };
 
     let rawLeads: RawLead[];
+    let collectionReason: CollectionStopReason;
+    let skipped: number;
+    let rounds: number;
     try {
       if (data.sourceType === "engagers") {
         // Each engagement type is its own page/strategy (reply thread vs. the retweets list) —
@@ -334,12 +414,22 @@ async function runScrape(
         // who both replied and retweeted only counts once. The shared map also means a failure
         // during the second strategy still carries the first one's leads out as partials.
         const merged = new Map<string, RawLead>();
+        const results = [];
         for (const type of data.engagementTypes ?? []) {
-          await scrollAndCollect(ENGAGEMENT_SOURCES[type], { ...collectOpts, into: merged });
+          results.push(await scrollAndCollect(ENGAGEMENT_SOURCES[type], { ...collectOpts, into: merged }));
         }
         rawLeads = Array.from(merged.values()).slice(0, candidateCap);
+        // Two strategies, one verdict: report the least satisfying ending, since that is the one
+        // that explains why the merged run came up short.
+        collectionReason = mergeCollectionReasons(results.map((result) => result.reason));
+        skipped = results.reduce((total, result) => total + result.skipped, 0);
+        rounds = results.reduce((total, result) => total + result.rounds, 0);
       } else {
-        rawLeads = await scrollAndCollect(SOURCES[data.sourceType], collectOpts);
+        const result = await scrollAndCollect(SOURCES[data.sourceType], collectOpts);
+        rawLeads = result.leads;
+        collectionReason = result.reason;
+        skipped = result.skipped;
+        rounds = result.rounds;
       }
     } catch (err) {
       await savePartialLeads(data, sink, err);
@@ -353,8 +443,9 @@ async function runScrape(
     // profiles it was always going to discard. Follower counts and locations are only knowable from
     // the profile, so they stay where they are: judged after the visit.
     const candidates = data.resultFilter?.verifiedOnly ? rawLeads.filter((lead) => lead.verified) : rawLeads;
+    const droppedUnverified = rawLeads.length - candidates.length;
 
-    sink.startChecking(candidates.length);
+    sink.startChecking();
 
     // Whether the *profile pass* was told to stop before it ran out of candidates — by the user's
     // "Finish now" or by the run's own clock. Deliberately not `timedOut`, which the collection
@@ -413,7 +504,17 @@ async function runScrape(
       }
     }
 
-    return { leadsFound: sink.saved, timedOut, unenriched };
+    return {
+      leadsFound: sink.saved,
+      timedOut,
+      unenriched,
+      paused: pauseRequested,
+      collected: rawLeads.length,
+      skipped,
+      droppedUnverified,
+      collectionReason,
+      rounds,
+    };
   } finally {
     await closeScrapeSession(session);
   }
@@ -449,10 +550,13 @@ export function startScrapeWorker(): Worker<ScrapeJobData> {
       const cooldown = await getAccountCooldown(xAccountId);
       if (cooldown) {
         const resumeAt = cooldown.until.getTime() + Math.floor(Math.random() * 5000);
-        await noteJobWaiting(
-          scrapeJobId,
-          `Waiting out X's rate limit on this account until ${cooldown.until.toISOString()} — this job will start on its own.`
-        ).catch((err: unknown) => logger.warn({ err, scrapeJobId }, "could not record the cooldown wait"));
+        await Promise.all([
+          noteJobWaiting(
+            scrapeJobId,
+            `Waiting out X's rate limit on this account — about ${describeMinutes(cooldown.until)} left. This job starts on its own; nothing to do.`
+          ),
+          saveScrapeResumeAt(job.data.userId, scrapeJobId, cooldown.until),
+        ]).catch((err: unknown) => logger.warn({ err, scrapeJobId }, "could not record the cooldown wait"));
         logger.info({ scrapeJobId, xAccountId, resumeAt }, "account is cooling down; deferring the job");
         await job.moveToDelayed(resumeAt, token);
         throw new DelayedError();
@@ -475,20 +579,25 @@ export function startScrapeWorker(): Worker<ScrapeJobData> {
         }
 
         await markJobStatus(scrapeJobId, "running", undefined, { startedAt: new Date() });
-        const { leadsFound, timedOut, unenriched } = await runScrape(job.data, sink);
-        // A run that ran out of clock still completed — it stopped looking and kept everything it
-        // found — but it did not do what was asked, so the job carries a note saying so. Without
-        // one, "20 requested, 6 found" is indistinguishable from a target that only had 6 matching
-        // accounts in it, and a full-looking count of leads with no profile details behind it
-        // looks like a clean success.
-        const timeoutNote = timedOut
-          ? describeRunLimitStop({
-              budgetMinutes: env.SCRAPE_MAX_RUN_MINUTES,
-              leadsFound,
-              capLeads: job.data.capLeads,
-              unenriched,
-            })
-          : null;
+        const outcome = await runScrape(job.data, sink);
+        const { leadsFound, timedOut, unenriched, paused } = outcome;
+        // Why this run produced the number it did — every bound it could have hit names itself.
+        // Before this, the clock was the only one that ever explained itself, so a run whose list
+        // stopped serving new accounts after five finished green and silent, indistinguishable
+        // from a target that genuinely only had five.
+        const shortfall = describeScrapeOutcome({
+          capLeads: job.data.capLeads,
+          leadsFound,
+          collected: outcome.collected,
+          checked: sink.checked,
+          droppedUnverified: outcome.droppedUnverified,
+          skipped: outcome.skipped,
+          collectionReason: outcome.collectionReason,
+          filtered: hasResultFilter(job.data.resultFilter),
+          timedOut,
+          budgetMinutes: env.SCRAPE_MAX_RUN_MINUTES,
+          unenriched,
+        });
         // A lead that matched but couldn't be saved after a retry is a second, independent reason
         // the count can come up short of what was asked for — distinct from running out of clock,
         // and just as invisible to the user if it isn't said out loud here.
@@ -496,7 +605,25 @@ export function startScrapeWorker(): Worker<ScrapeJobData> {
           sink.failed > 0
             ? `${sink.failed} matching lead${sink.failed === 1 ? "" : "s"} could not be saved after a retry — a database error, not a shortage of matches. Run it again to pick ${sink.failed === 1 ? "it" : "them"} up.`
             : null;
-        const shortfallNote = [timeoutNote, failedNote].filter(Boolean).join(" ") || undefined;
+
+        if (paused) {
+          // Stopped on the user's word rather than on a limit, and deliberately resumable: the job
+          // keeps its leads and goes back on the queue untouched when they press Resume.
+          const pausedNote = ["Paused by you. Resume to carry on from here.", shortfall, failedNote]
+            .filter(Boolean)
+            .join(" ");
+          await markJobStatus(scrapeJobId, "paused", pausedNote, { finishedAt: new Date(), leadsFound });
+          await touchAccountLastUsed(xAccountId);
+          await logActivity(job.data.userId, "scrape.paused", {
+            scrapeJobId,
+            xAccountId,
+            sourceType: job.data.sourceType,
+            leadsFound,
+          });
+          return;
+        }
+
+        const shortfallNote = [shortfall, failedNote].filter(Boolean).join(" ") || undefined;
         await markJobStatus(scrapeJobId, "completed", shortfallNote, { finishedAt: new Date(), leadsFound });
         await touchAccountLastUsed(xAccountId);
         await logActivity(job.data.userId, "scrape.completed", {
@@ -506,6 +633,9 @@ export function startScrapeWorker(): Worker<ScrapeJobData> {
           leadsFound,
           timedOut,
           unenriched,
+          collectionReason: outcome.collectionReason,
+          collected: outcome.collected,
+          rounds: outcome.rounds,
         });
       } catch (err) {
         if (isScrapeCancelledError(err)) {
@@ -538,10 +668,16 @@ export function startScrapeWorker(): Worker<ScrapeJobData> {
             env.RATE_LIMIT_COOLDOWN_MINUTES,
             env.RATE_LIMIT_COOLDOWN_MAX_MINUTES
           );
+          // The resume time goes on the job as data, not baked into the sentence: an ISO timestamp
+          // in an error message is unreadable and, minutes later, wrong. The job page counts down
+          // to `resumeAt` instead and offers Resume the moment it passes.
+          await saveScrapeResumeAt(job.data.userId, scrapeJobId, rest.until).catch((saveErr: unknown) =>
+            logger.warn({ err: saveErr, scrapeJobId }, "could not record when this job may resume")
+          );
           await markJobStatus(
             scrapeJobId,
             "paused",
-            `X rate-limited this run. The account stays connected and rests until ${rest.until.toISOString()} — no reconnect needed. (${err.message})`,
+            `X rate-limited this run, so it stopped early and kept what it had. The account stays connected — no reconnect needed — and rests for about ${describeMinutes(rest.until)} before this scrape can be resumed. (${err.message})`,
             { finishedAt: new Date(), leadsFound }
           );
           await logActivity(job.data.userId, "account.rate_limited", {
@@ -580,9 +716,10 @@ export function startScrapeWorker(): Worker<ScrapeJobData> {
         await releaseAccountSlot(slot);
         // The run is over one way or another, so a pending "wrap up now" has nothing left to act
         // on. Clearing it keeps a retry of this job from stopping itself on a stale request.
-        await clearScrapeFinishRequest(job.data.userId, scrapeJobId).catch((err: unknown) =>
-          logger.warn({ err, scrapeJobId }, "could not clear the finish request")
-        );
+        await Promise.all([
+          clearScrapeFinishRequest(job.data.userId, scrapeJobId),
+          clearScrapePauseRequest(job.data.userId, scrapeJobId),
+        ]).catch((err: unknown) => logger.warn({ err, scrapeJobId }, "could not clear the stop requests"));
       }
     },
     { connection: redisConnection, concurrency: env.WORKER_CONCURRENCY }

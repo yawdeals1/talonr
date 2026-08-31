@@ -5,6 +5,7 @@ import { X_HANDLE_PATTERN, X_TWEET_URL_PATTERN } from "../../scraper/types.js";
 import type { AuthedRequest } from "../auth/auth.middleware.js";
 import {
   cancelScrapeJob,
+  continueScrapeJob,
   createScrapeJob,
   deleteScrapeJob,
   deleteScrapeJobs,
@@ -12,6 +13,8 @@ import {
   getScrapeJob,
   listScrapeJobLeads,
   listScrapeJobs,
+  pauseScrapeJob,
+  resumeScrapeJob,
   updateScrapeResultFilter,
 } from "./scrapes.service.js";
 
@@ -125,6 +128,20 @@ export async function cancel(req: AuthedRequest, res: Response) {
 
 export async function finishEarly(req: AuthedRequest, res: Response) {
   res.json({ scrapeJob: await finishScrapeJobEarly(req.user!.id, req.params.id) });
+}
+
+export async function pause(req: AuthedRequest, res: Response) {
+  res.json({ scrapeJob: await pauseScrapeJob(req.user!.id, req.params.id) });
+}
+
+export async function resume(req: AuthedRequest, res: Response) {
+  res.json({ scrapeJob: await resumeScrapeJob(req.user!.id, req.params.id) });
+}
+
+// Creates a *new* job for the same target, so it answers 201 with that job rather than the one it
+// was continued from — the caller navigates to the new run.
+export async function continueRun(req: AuthedRequest, res: Response) {
+  res.status(201).json({ scrapeJob: await continueScrapeJob(req.user!.id, req.params.id) });
 }
 
 export async function remove(req: AuthedRequest, res: Response) {

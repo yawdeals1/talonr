@@ -60,6 +60,12 @@ export interface ScrapeJob {
   // Live counters a running job publishes so the UI can show what it's doing; null before the run
   // reports anything and for jobs that predate progress reporting.
   progress: ScrapeProgress | null;
+  // The lead cap the job was asked for. There is no column for it — it lives in the same internal
+  // lead_lists record as the filter and the progress — so it is null for jobs created before it
+  // was recorded. Needed to resume or continue a run, and to say "5 of the 100 requested".
+  capLeads: number | null;
+  // When a run paused by X's rate limit may be resumed, ISO. Null for every other kind of pause.
+  resumeAt: string | null;
   status: ScrapeJobStatus;
   leadsFound: number;
   errorMessage: string | null;

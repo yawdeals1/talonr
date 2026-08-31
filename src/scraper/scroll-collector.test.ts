@@ -28,7 +28,30 @@ function throttlePattern(counts: number[]) {
   };
 }
 
-function fakePage(): Page {
+interface FakePageOptions {
+  /** Whether a dispatched wheel actually scrolls this page — false is the failure being tested. */
+  wheelWorks?: boolean;
+  /** Whether scrolling from inside the page works when the wheel doesn't. */
+  forceWorks?: boolean;
+}
+
+/**
+ * A page whose scroll position the collector can observe, which is the whole point of the
+ * before/after measurement it now does: a wheel event is a request, not a guarantee, and a fake
+ * that always "moves" can't tell the two apart.
+ */
+function fakePage(options: FakePageOptions = {}): Page {
+  const { wheelWorks = true, forceWorks = false } = options;
+  const timeline = { offset: 0, height: 20_000, cells: 20, lastCell: "/a0" };
+  let step = 0;
+
+  function advance() {
+    timeline.offset += 600;
+    timeline.cells += 2;
+    step += 1;
+    timeline.lastCell = `/a${step}`;
+  }
+
   return {
     goto: vi.fn(async () => null),
     viewportSize: vi.fn(() => ({ width: 1280, height: 720 })),
@@ -37,8 +60,20 @@ function fakePage(): Page {
     })),
     mouse: {
       move: vi.fn(async () => undefined),
-      wheel: vi.fn(async () => undefined),
+      wheel: vi.fn(async () => {
+        if (wheelWorks) advance();
+      }),
     },
+    keyboard: { press: vi.fn(async () => undefined) },
+    // Both in-page helpers go through evaluate. Reading returns the timeline; the forcing helper
+    // moves it only when this fake says in-page scrolling works.
+    evaluate: vi.fn(async (fn: unknown) => {
+      if (typeof fn === "function" && fn.name === "forceTimelineScroll") {
+        if (forceWorks) advance();
+        return undefined;
+      }
+      return { ...timeline };
+    }),
   } as unknown as Page;
 }
 
@@ -50,18 +85,29 @@ function countingSource(): ScrapeSource {
     waitForReady: async () => undefined,
     extractVisibleItems: async () => {
       round += 1;
-      return [`a${round}`, `b${round}`].map(
-        (handle): RawLead => ({
-          handle,
-          displayName: handle,
-          bio: null,
-          followers: null,
-          location: null,
-          verified: false,
-          profileImage: null,
-        })
-      );
+      return [`a${round}`, `b${round}`].map(lead);
     },
+  };
+}
+
+/** Yields the same two handles forever: a list that keeps rendering but never produces anything new. */
+function repeatingSource(handles = ["a1", "b1"]): ScrapeSource {
+  return {
+    buildUrl: () => "https://x.com/someone/followers",
+    waitForReady: async () => undefined,
+    extractVisibleItems: async () => handles.map(lead),
+  };
+}
+
+function lead(handle: string): RawLead {
+  return {
+    handle,
+    displayName: handle,
+    bio: null,
+    followers: null,
+    location: null,
+    verified: false,
+    profileImage: null,
   };
 }
 
@@ -74,6 +120,9 @@ function context(page: Page, overrides: Record<string, unknown> = {}) {
     maxScrollDelayMs: 1,
     rateLimitTolerance: 3,
     rateLimitBackoffMs: 5,
+    // The real bound is twelve seconds — long enough to outlast X's followers fetch under load,
+    // and far too long to sit through here.
+    contentWaitMs: 20,
     ...overrides,
   };
 }
@@ -90,9 +139,10 @@ describe("scrollAndCollect rate-limit handling", () => {
     // a cooldown, checkpointed the account and cost a full interactive re-login.
     detectors.watchForRateLimitResponses.mockReturnValue(throttlePattern([1, 0]));
 
-    const leads = await scrollAndCollect(countingSource(), context(fakePage()));
+    const result = await scrollAndCollect(countingSource(), context(fakePage()));
 
-    expect(leads).toHaveLength(4);
+    expect(result.leads).toHaveLength(4);
+    expect(result.reason).toBe("cap");
   });
 
   it("gives up only once several consecutive rounds come back throttled", async () => {
@@ -145,9 +195,10 @@ describe("scrollAndCollect stop handling", () => {
     const page = fakePage();
     const checkpoint = vi.fn(async () => "finish" as const);
 
-    const leads = await scrollAndCollect(countingSource(), context(page, { checkpoint }));
+    const result = await scrollAndCollect(countingSource(), context(page, { checkpoint }));
 
-    expect(leads).toEqual([]);
+    expect(result.leads).toEqual([]);
+    expect(result.reason).toBe("stopped");
     expect(page.goto).not.toHaveBeenCalled();
   });
 
@@ -158,10 +209,11 @@ describe("scrollAndCollect stop handling", () => {
     let calls = 0;
     const checkpoint = vi.fn(async () => (calls++ < 2 ? ("continue" as const) : ("finish" as const)));
 
-    const leads = await scrollAndCollect(countingSource(), context(page, { capLeads: 100, checkpoint }));
+    const result = await scrollAndCollect(countingSource(), context(page, { capLeads: 100, checkpoint }));
 
     expect(page.goto).toHaveBeenCalledTimes(1);
-    expect(leads).toHaveLength(2);
+    expect(result.leads).toHaveLength(2);
+    expect(result.reason).toBe("stopped");
   });
 });
 
@@ -181,6 +233,117 @@ describe("scrollAndCollect timeline scrolling", () => {
     expect(move.mock.invocationCallOrder[0]).toBeLessThan(wheel.mock.invocationCallOrder[0]!);
     expect(wheel.mock.calls[0]![1]).toBeGreaterThanOrEqual(600);
     expect(wheel.mock.calls[0]![1]).toBeLessThanOrEqual(720);
+  });
+
+  it("does not escalate past the wheel while the wheel is working", async () => {
+    const page = fakePage();
+
+    await scrollAndCollect(countingSource(), context(page));
+
+    expect(page.keyboard.press).not.toHaveBeenCalled();
+  });
+
+  it("scrolls from inside the page when the wheel does not land", async () => {
+    // The failure this exists for: a dispatched wheel that scrolls nothing leaves the collector
+    // re-reading one viewport until the stagnation counter ends the run — which reported success
+    // with a handful of leads and said nothing at all about why.
+    const page = fakePage({ wheelWorks: false, forceWorks: true });
+
+    const result = await scrollAndCollect(countingSource(), context(page));
+
+    expect(result.leads).toHaveLength(4);
+    expect(page.keyboard.press).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the keyboard when nothing else moves the page", async () => {
+    const page = fakePage({ wheelWorks: false, forceWorks: false });
+
+    await scrollAndCollect(repeatingSource(), context(page, { capLeads: 100 }));
+
+    expect(page.keyboard.press).toHaveBeenCalledWith("End");
+  });
+});
+
+describe("scrollAndCollect stop reasons", () => {
+  beforeEach(() => {
+    detectors.watchForRateLimitResponses.mockReturnValue(throttlePattern([0]));
+  });
+
+  it("calls a page that will not move at all exhausted, not stalled", async () => {
+    // Nothing we can do to the page produces more, so the list has ended. Saying so is the whole
+    // point: a completed job with no message was previously the only thing this ever produced.
+    const page = fakePage({ wheelWorks: false, forceWorks: false });
+
+    const result = await scrollAndCollect(repeatingSource(), context(page, { capLeads: 100 }));
+
+    expect(result.reason).toBe("exhausted");
+    expect(result.leads).toHaveLength(2);
+  });
+
+  it("calls a page that keeps scrolling without producing stalled", async () => {
+    // Same symptom as the end of a list — no new accounts — but a different cause, and a different
+    // thing to tell the user: X is still serving pages, it has just stopped putting anyone new on
+    // them, so running it again later is worth doing.
+    const page = fakePage();
+
+    const result = await scrollAndCollect(repeatingSource(), context(page, { capLeads: 100 }));
+
+    expect(result.reason).toBe("stalled");
+  });
+});
+
+describe("scrollAndCollect skip handles", () => {
+  beforeEach(() => {
+    detectors.watchForRateLimitResponses.mockReturnValue(throttlePattern([0]));
+  });
+
+  it("passes over accounts an earlier run already collected without charging them to the cap", async () => {
+    const source: ScrapeSource = {
+      buildUrl: () => "https://x.com/someone/followers",
+      waitForReady: async () => undefined,
+      extractVisibleItems: (() => {
+        let round = 0;
+        return async () => {
+          round += 1;
+          // Two already-known accounts per round alongside one genuinely new one.
+          return [`old${round}`, `new${round}`, `old${round}b`].map(lead);
+        };
+      })(),
+    };
+
+    const result = await scrollAndCollect(
+      source,
+      context(fakePage(), {
+        capLeads: 2,
+        skipHandles: new Set(["old1", "old1b", "old2", "old2b", "old3", "old3b"]),
+      })
+    );
+
+    expect(result.leads.map((item) => item.handle)).toEqual(["new1", "new2"]);
+    expect(result.skipped).toBe(4);
+    expect(result.reason).toBe("cap");
+  });
+
+  it("treats scrolling past known accounts as progress rather than stagnation", async () => {
+    // A continued run spends its first rounds re-reading what it already has. Counting those
+    // rounds stagnant would end it after MAX_STAGNANT_ROUNDS of them — before it ever reached an
+    // account that was actually new, which is the entire point of continuing.
+    let round = 0;
+    const source: ScrapeSource = {
+      buildUrl: () => "https://x.com/someone/followers",
+      waitForReady: async () => undefined,
+      extractVisibleItems: async () => {
+        round += 1;
+        // Eight rounds of nothing but known accounts — more than MAX_STAGNANT_ROUNDS — then one new.
+        return [round <= 8 ? `old${round}` : `fresh${round}`].map(lead);
+      },
+    };
+
+    const skipHandles = new Set(Array.from({ length: 8 }, (_, index) => `old${index + 1}`));
+    const result = await scrollAndCollect(source, context(fakePage(), { capLeads: 1, skipHandles }));
+
+    expect(result.skipped).toBe(8);
+    expect(result.leads.map((item) => item.handle)).toEqual(["fresh9"]);
   });
 });
 
@@ -206,8 +369,8 @@ describe("scrollAndCollect page opening", () => {
   /** Runs the collector to completion with the retry delays fast-forwarded. */
   async function runFastForwarded(source: ScrapeSource, ctx: ReturnType<typeof context>) {
     const settled = scrollAndCollect(source, ctx).then(
-      (leads) => ({ leads, err: null as unknown }),
-      (err: unknown) => ({ leads: null, err })
+      (result) => ({ result, err: null as unknown }),
+      (err: unknown) => ({ result: null, err })
     );
     await vi.advanceTimersByTimeAsync(120_000);
     return settled;
@@ -246,10 +409,10 @@ describe("scrollAndCollect page opening", () => {
     const goto = page.goto as unknown as ReturnType<typeof vi.fn>;
     goto.mockRejectedValueOnce(timeoutError("page.goto: Timeout 60000ms exceeded."));
 
-    const { leads } = await runFastForwarded(countingSource(), context(page));
+    const { result } = await runFastForwarded(countingSource(), context(page));
 
     expect(goto).toHaveBeenCalledTimes(2);
-    expect(leads).toHaveLength(4);
+    expect(result!.leads).toHaveLength(4);
   });
 
   it("names the account signal behind a list that never appeared", async () => {
@@ -281,10 +444,10 @@ describe("scrollAndCollect page opening", () => {
     const checkpoint = vi.fn(async () => "continue" as const);
     checkpoint.mockResolvedValueOnce("continue" as const).mockResolvedValue("finish" as const);
 
-    const { leads, err } = await runFastForwarded(countingSource(), context(page, { checkpoint }));
+    const { result, err } = await runFastForwarded(countingSource(), context(page, { checkpoint }));
 
     expect(err).toBeNull();
-    expect(leads).toEqual([]);
+    expect(result!.leads).toEqual([]);
     expect(page.goto).toHaveBeenCalledTimes(1);
   });
 });

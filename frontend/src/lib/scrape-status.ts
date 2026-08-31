@@ -26,3 +26,27 @@ export function scrapeDisplayStatus(job: JobStatusFields): PillStatus {
 export function isCancellableScrape(job: JobStatusFields): boolean {
   return job.status === "queued" || job.status === "running";
 }
+
+/** Queued or running: the two states a scrape can be paused from. */
+export function isPausableScrape(job: JobStatusFields): boolean {
+  return job.status === "queued" || job.status === "running";
+}
+
+/**
+ * Paused, whatever paused it — you, X's rate limit, or the account's daily quota. All three leave
+ * the job in the same state needing the same thing, so they get the same button.
+ */
+export function isResumableScrape(job: JobStatusFields): boolean {
+  return job.status === "paused";
+}
+
+/**
+ * Over, and worth running again for more.
+ *
+ * Deliberately includes a cancelled and a failed run as well as a completed one: "give me more
+ * leads from this target" is a reasonable thing to want after any ending except a pause, which has
+ * Resume instead — that one keeps the same job rather than starting a new one.
+ */
+export function isContinuableScrape(job: JobStatusFields): boolean {
+  return job.status === "completed" || job.status === "failed";
+}

@@ -7,10 +7,13 @@ import { createLeadList } from "../api/leadLists";
 import { bulkDeleteLeads } from "../api/leads";
 import {
   cancelScrape,
+  continueScrape,
   deleteScrape,
   finishScrape,
   getScrape,
   listScrapeLeads,
+  pauseScrape,
+  resumeScrape,
   updateScrapeResultFilter,
 } from "../api/scrapes";
 import type { Lead, ScrapeResultFilter } from "../api/types";
@@ -19,11 +22,19 @@ import { EmptyState } from "../components/EmptyState";
 import { LeadDetailDrawer } from "../components/LeadDetailDrawer";
 import { LeadsTable } from "../components/LeadsTable";
 import { Modal } from "../components/Modal";
+import { isFuture, ResumeCountdown } from "../components/ResumeCountdown";
 import { ScrapeProgressPanel } from "../components/ScrapeProgressPanel";
 import { SkeletonRows } from "../components/Skeleton";
 import { StatusPill } from "../components/StatusPill";
 import { formatDateTime, formatNumber } from "../lib/format";
-import { isCancellableScrape, isCancelledScrape, scrapeDisplayStatus } from "../lib/scrape-status";
+import {
+  isCancellableScrape,
+  isCancelledScrape,
+  isContinuableScrape,
+  isPausableScrape,
+  isResumableScrape,
+  scrapeDisplayStatus,
+} from "../lib/scrape-status";
 
 const LEADS_PAGE_SIZE = 50;
 
@@ -194,6 +205,31 @@ export function ScrapeJobDetail() {
     },
   });
 
+  const pauseMutation = useMutation({
+    mutationFn: () => pauseScrape(id!),
+    onSuccess: ({ scrapeJob }) => {
+      queryClient.setQueryData(["scrapes", id], { scrapeJob });
+      queryClient.invalidateQueries({ queryKey: ["scrapes"] });
+    },
+  });
+
+  const resumeMutation = useMutation({
+    mutationFn: () => resumeScrape(id!),
+    onSuccess: ({ scrapeJob }) => {
+      queryClient.setQueryData(["scrapes", id], { scrapeJob });
+      queryClient.invalidateQueries({ queryKey: ["scrapes"] });
+    },
+  });
+
+  const continueMutation = useMutation({
+    mutationFn: () => continueScrape(id!),
+    // A continue creates a *new* run, so the useful thing to do with the answer is go and watch it.
+    onSuccess: ({ scrapeJob }) => {
+      queryClient.invalidateQueries({ queryKey: ["scrapes"] });
+      navigate(`/scrapes/${scrapeJob.id}`);
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: () => deleteScrape(id!),
     onSuccess: () => {
@@ -233,9 +269,25 @@ export function ScrapeJobDetail() {
         <StatusPill status={scrapeDisplayStatus(job)} />
       </div>
 
+      {/* A paused run is not a failed one — it stopped and is waiting to be picked back up — so it
+          reads as a warning rather than an error, and carries its own countdown when X's rate limit
+          is what it is waiting on. */}
       {(job.status === "failed" || job.status === "paused") && job.errorMessage && !isCancelledScrape(job) && (
-        <div className="rounded-md border border-status-danger-bg bg-status-danger-bg p-3 text-sm text-status-danger">
+        <div
+          className={
+            job.status === "paused"
+              ? "rounded-md border border-status-warning-bg bg-status-warning-bg p-3 text-sm text-status-warning"
+              : "rounded-md border border-status-danger-bg bg-status-danger-bg p-3 text-sm text-status-danger"
+          }
+        >
           {job.errorMessage}
+        </div>
+      )}
+
+      {job.status === "queued" && isFuture(job.resumeAt) && (
+        <div className="rounded-md border border-status-warning-bg bg-status-warning-bg p-3 text-sm text-status-warning">
+          Waiting out X's rate limit on this account — <ResumeCountdown until={job.resumeAt} /> to go. This scrape
+          starts on its own; there is nothing to do.
         </div>
       )}
 
@@ -260,6 +312,11 @@ export function ScrapeJobDetail() {
             {hasLeadFilters
               ? `${formatNumber(matchedLeadCount)} / ${formatNumber(job.leadsFound)}`
               : formatNumber(job.leadsFound)}
+            {/* Against the number that was asked for, so a short run is short on the face of it
+                rather than only in the note below. */}
+            {job.capLeads !== null && !hasLeadFilters && (
+              <span className="text-zinc-400"> of {formatNumber(job.capLeads)}</span>
+            )}
           </dd>
         </div>
         <div>
@@ -276,42 +333,109 @@ export function ScrapeJobDetail() {
         </div>
       </dl>
 
-      {isCancellableScrape(job) && (
+      {/* Three ways to stop a run and two ways to start one again, kept together so the difference
+          between them is visible at the point of choosing. Pause and Resume are the pair that
+          preserve the run; Stop is terminal; Continue starts a fresh run over the same target. */}
+      {(isPausableScrape(job) || isResumableScrape(job) || isContinuableScrape(job)) && (
         <div>
-          <button
-            type="button"
-            onClick={() => (job.status === "running" ? setConfirmCancel(true) : cancelMutation.mutate())}
-            disabled={cancelMutation.isPending}
-            className="rounded-md border border-status-danger-bg px-4 py-2 text-sm font-medium text-status-danger hover:bg-status-danger-bg disabled:opacity-50"
-          >
-            {cancelMutation.isPending ? "Stopping…" : job.status === "running" ? "Stop scrape" : "Cancel scrape"}
-          </button>
-          {job.status === "running" && (
-            <button
-              type="button"
-              onClick={() => finishMutation.mutate()}
-              disabled={finishMutation.isPending || finishMutation.isSuccess}
-              className="ml-2 rounded-md border px-4 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-50 dark:hover:bg-zinc-800"
-            >
-              {finishMutation.isSuccess ? "Finishing…" : finishMutation.isPending ? "Asking…" : "Finish now"}
-            </button>
-          )}
+          <div className="flex flex-wrap gap-2">
+            {isPausableScrape(job) && (
+              <button
+                type="button"
+                onClick={() => pauseMutation.mutate()}
+                disabled={pauseMutation.isPending || pauseMutation.isSuccess}
+                className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-50 dark:hover:bg-zinc-800"
+              >
+                {pauseMutation.isSuccess && job.status === "running"
+                  ? "Pausing…"
+                  : pauseMutation.isPending
+                    ? "Pausing…"
+                    : "Pause scrape"}
+              </button>
+            )}
+
+            {isResumableScrape(job) && (
+              <button
+                type="button"
+                onClick={() => resumeMutation.mutate()}
+                disabled={resumeMutation.isPending}
+                className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {resumeMutation.isPending ? "Resuming…" : "Resume scrape"}
+              </button>
+            )}
+
+            {isContinuableScrape(job) && (
+              <button
+                type="button"
+                onClick={() => continueMutation.mutate()}
+                disabled={continueMutation.isPending}
+                className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {continueMutation.isPending ? "Starting…" : "Continue scraping"}
+              </button>
+            )}
+
+            {job.status === "running" && (
+              <button
+                type="button"
+                onClick={() => finishMutation.mutate()}
+                disabled={finishMutation.isPending || finishMutation.isSuccess}
+                className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-50 dark:hover:bg-zinc-800"
+              >
+                {finishMutation.isSuccess ? "Finishing…" : finishMutation.isPending ? "Asking…" : "Finish now"}
+              </button>
+            )}
+
+            {isCancellableScrape(job) && (
+              <button
+                type="button"
+                onClick={() => (job.status === "running" ? setConfirmCancel(true) : cancelMutation.mutate())}
+                disabled={cancelMutation.isPending}
+                className="rounded-md border border-status-danger-bg px-4 py-2 text-sm font-medium text-status-danger hover:bg-status-danger-bg disabled:opacity-50"
+              >
+                {cancelMutation.isPending ? "Stopping…" : job.status === "running" ? "Stop scrape" : "Cancel scrape"}
+              </button>
+            )}
+          </div>
+
           <p className="mt-2 text-xs text-zinc-500">
             {job.status === "running"
-              ? "Stopping ends the run at its next checkpoint — within about ten seconds — and keeps every lead it has already collected. Finishing does the same but lets the scrape complete normally instead of being marked cancelled."
-              : "This scrape hasn't started yet, so it will be taken off the queue."}
+              ? "Pausing and finishing both stop the run at its next checkpoint — within about ten seconds — and keep every lead collected so far. A paused scrape can be resumed and carries on where it left off; a finished one completes for good. Stopping marks it cancelled."
+              : job.status === "queued"
+                ? "This scrape hasn't started yet. Pausing parks it; cancelling takes it off the queue for good."
+                : isResumableScrape(job)
+                  ? "Resuming puts this scrape back on the queue with everything it already found. It scrolls straight past the accounts it has and spends its budget on new ones."
+                  : "Continuing runs this target again as a new scrape, skipping every account already collected from it — so you get more leads rather than the same page twice."}
           </p>
+
+          {/* The answer to "when can I carry on?", ticking, instead of the ISO timestamp that used
+              to sit in the error message above. */}
+          {isResumableScrape(job) && isFuture(job.resumeAt) && (
+            <p className="mt-2 text-xs text-zinc-500">
+              X is still rate-limiting this account — about{" "}
+              <ResumeCountdown until={job.resumeAt} className="text-zinc-700 dark:text-zinc-300" /> to go. You can
+              resume now anyway: it waits out the rest on the queue and starts itself the moment the limit lifts.
+            </p>
+          )}
+
+          {pauseMutation.isSuccess && job.status === "running" && (
+            <p className="mt-2 text-xs text-zinc-500">
+              Asked to pause — the run stops at its next checkpoint and this page will offer Resume.
+            </p>
+          )}
           {finishMutation.isSuccess && (
             <p className="mt-2 text-xs text-zinc-500">
               Asked to wrap up — the run stops looking at its next checkpoint and completes with what it found.
             </p>
           )}
-          {[cancelMutation.error, finishMutation.error].map((error, index) =>
-            error instanceof ApiError ? (
-              <p key={index} className="mt-2 text-sm text-status-danger">
-                {error.message}
-              </p>
-            ) : null
+          {[cancelMutation.error, finishMutation.error, pauseMutation.error, resumeMutation.error, continueMutation.error].map(
+            (error, index) =>
+              error instanceof ApiError ? (
+                <p key={index} className="mt-2 text-sm text-status-danger">
+                  {error.message}
+                </p>
+              ) : null
           )}
         </div>
       )}

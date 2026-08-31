@@ -3,12 +3,15 @@ import type { Lead, LeadList, ScrapeJob, XAccount } from "../../db/schema.js";
 import { NotFoundError, ValidationError } from "../../lib/errors.js";
 import {
   cancelScrapeJob,
+  continueScrapeJob,
   createScrapeJob,
   deleteScrapeJob,
   deleteScrapeJobs,
   finishScrapeJobEarly,
   getScrapeJob,
   listScrapeJobLeads,
+  pauseScrapeJob,
+  resumeScrapeJob,
   updateScrapeResultFilter,
 } from "./scrapes.service.js";
 import { CANCELLED_ERROR_MESSAGE, isCancelledJob } from "./scrape-cancel.js";
@@ -278,6 +281,125 @@ describe("scrapes.service ownership isolation", () => {
     studioGet.mockResolvedValue({ ...ownedJob, status: "running" });
     await expect(finishScrapeJobEarly(ATTACKER, JOB_ID)).rejects.toBeInstanceOf(NotFoundError);
     expect(studioInsert).not.toHaveBeenCalled();
+  });
+
+  it("pauseScrapeJob: records a pause request for a running job without writing the row", async () => {
+    // Same mechanism as "finish" and a different ending: the worker owns the status write, because
+    // only it knows when the run actually stopped.
+    studioGet.mockResolvedValue({ ...ownedJob, status: "running" });
+    studioInsert.mockResolvedValue({});
+
+    await pauseScrapeJob(OWNER, JOB_ID);
+
+    expect(studioInsert).toHaveBeenCalledWith(
+      "lead_lists",
+      expect.objectContaining({
+        userId: OWNER,
+        name: `__talonr_scrape_pause__:${JOB_ID}`,
+        filterDefinition: expect.objectContaining({ pauseRequested: true, scrapeJobId: JOB_ID }),
+      })
+    );
+    expect(studioUpdate).not.toHaveBeenCalled();
+  });
+
+  it("pauseScrapeJob: parks a queued job straight away, since there is no run to signal", async () => {
+    const getState = vi.fn().mockResolvedValue("waiting");
+    const remove = vi.fn().mockResolvedValue(undefined);
+    studioGet.mockResolvedValue(ownedJob);
+    queueGetJob.mockResolvedValue({ getState, remove });
+    studioUpdate.mockResolvedValue({ ...ownedJob, status: "paused" });
+    studioInsert.mockResolvedValue({});
+
+    await pauseScrapeJob(OWNER, JOB_ID);
+
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(studioUpdate).toHaveBeenCalledWith(
+      "scrape_jobs",
+      JOB_ID,
+      expect.objectContaining({ status: "paused" })
+    );
+  });
+
+  it("pauseScrapeJob: a different user cannot pause someone else's run", async () => {
+    studioGet.mockResolvedValue({ ...ownedJob, status: "running" });
+    await expect(pauseScrapeJob(ATTACKER, JOB_ID)).rejects.toBeInstanceOf(NotFoundError);
+    expect(studioInsert).not.toHaveBeenCalled();
+    expect(studioUpdate).not.toHaveBeenCalled();
+  });
+
+  it("resumeScrapeJob: requeues the same job, skipping the handles it already collected", async () => {
+    // The point of resuming rather than triggering a fresh scrape: it does not spend its budget
+    // re-reading profiles that are already on file.
+    studioGet.mockImplementation(async (table: string) =>
+      table === "x_accounts" ? ownedAccount : { ...ownedJob, status: "paused" }
+    );
+    studioList.mockResolvedValue({ rows: [resultStore], total: 1 });
+    studioListSorted.mockResolvedValue([
+      { id: "lead-1", handle: "AlreadyHave" },
+      { id: "lead-2", handle: "AlsoHave" },
+    ] as Lead[]);
+    queueGetJob.mockResolvedValue(null);
+    studioUpdate.mockResolvedValue({ ...ownedJob, status: "queued" });
+
+    await resumeScrapeJob(OWNER, JOB_ID);
+
+    expect(studioUpdate).toHaveBeenCalledWith(
+      "scrape_jobs",
+      JOB_ID,
+      expect.objectContaining({ status: "queued", errorMessage: null, finishedAt: null })
+    );
+    expect(queueAdd).toHaveBeenCalledWith(
+      "scrape",
+      // Lowercased, because the collector dedupes on a lowercased handle.
+      expect.objectContaining({ scrapeJobId: JOB_ID, skipHandles: ["alreadyhave", "alsohave"] }),
+      { jobId: JOB_ID }
+    );
+  });
+
+  it("resumeScrapeJob: refuses anything that is not paused", async () => {
+    studioGet.mockResolvedValue({ ...ownedJob, status: "completed" });
+    await expect(resumeScrapeJob(OWNER, JOB_ID)).rejects.toBeInstanceOf(ValidationError);
+    expect(queueAdd).not.toHaveBeenCalled();
+  });
+
+  it("resumeScrapeJob: a different user cannot resume someone else's run", async () => {
+    studioGet.mockResolvedValue({ ...ownedJob, status: "paused" });
+    await expect(resumeScrapeJob(ATTACKER, JOB_ID)).rejects.toBeInstanceOf(NotFoundError);
+    expect(queueAdd).not.toHaveBeenCalled();
+  });
+
+  it("continueScrapeJob: starts a new run over the same target, skipping what is already saved", async () => {
+    // A new row rather than a reused one — the finished job's own results table has to keep meaning
+    // "what that run found".
+    const finished = { ...ownedJob, status: "completed" as const, sourceType: "followers" as const };
+    studioGet.mockImplementation(async (table: string) => (table === "x_accounts" ? ownedAccount : finished));
+    studioList.mockResolvedValue({ rows: [resultStore], total: 1 });
+    studioListSorted.mockResolvedValue([{ id: "lead-1", handle: "AlreadyHave" }] as Lead[]);
+    studioInsert.mockImplementation(async (table: string) =>
+      table === "scrape_jobs" ? { ...finished, id: "job-2", status: "queued" } : resultStore
+    );
+
+    const created = await continueScrapeJob(OWNER, JOB_ID);
+
+    expect(created.id).toBe("job-2");
+    expect(queueAdd).toHaveBeenCalledWith(
+      "scrape",
+      expect.objectContaining({ scrapeJobId: "job-2", skipHandles: ["alreadyhave"] }),
+      { jobId: "job-2" }
+    );
+  });
+
+  it("continueScrapeJob: sends a paused job to resume instead, so it keeps its leads", async () => {
+    studioGet.mockResolvedValue({ ...ownedJob, status: "paused" });
+    await expect(continueScrapeJob(OWNER, JOB_ID)).rejects.toBeInstanceOf(ValidationError);
+    expect(studioInsert).not.toHaveBeenCalled();
+  });
+
+  it("continueScrapeJob: a different user cannot continue someone else's scrape", async () => {
+    studioGet.mockResolvedValue({ ...ownedJob, status: "completed" });
+    await expect(continueScrapeJob(ATTACKER, JOB_ID)).rejects.toBeInstanceOf(NotFoundError);
+    expect(studioInsert).not.toHaveBeenCalled();
+    expect(queueAdd).not.toHaveBeenCalled();
   });
 
   it("cancelScrapeJob: refuses a job that has already finished", async () => {

@@ -55,6 +55,49 @@ export interface ScrapeSourceContext {
   navTimeoutMs?: number;
   /** Called after each scroll round with the number of unique handles collected so far. */
   onProgress?: (collected: number) => void;
+  /**
+   * Longest a round waits for X to answer a scroll with more of the list before calling the round
+   * stagnant. Passed in like the other timings so this module stays free of env imports, and so
+   * tests don't sit through the real thing; the collector's own default applies when it is absent.
+   */
+  contentWaitMs?: number;
+  /**
+   * Handles a previous run already collected from this target, lowercased.
+   *
+   * A resumed or continued scrape scrolls back over the same accounts before it reaches new ones —
+   * they are recognised here and neither counted toward `capLeads` nor handed on for a profile
+   * visit, so "continue" means another `capLeads` *new* leads rather than the same page again.
+   * Seeing one still counts as progress for the stagnation check (see scrollAndCollect): a run
+   * scrolling through a thousand already-known followers is advancing, not stuck.
+   */
+  skipHandles?: Set<string>;
+}
+
+/**
+ * Why a collection run stopped, so the job can say what it ran out of.
+ *
+ * A run that ends on the lead cap needs no explanation. Every other ending does, and until this
+ * existed none of them produced one: a followers scrape whose list stopped yielding new accounts
+ * after five completed with a green tick and no message at all, indistinguishable from a target
+ * that genuinely only had five.
+ */
+export type CollectionStopReason =
+  /** Collected the full candidate pool it was asked for. */
+  | "cap"
+  /** The user, or the run's own clock, said stop. */
+  | "stopped"
+  /** The page stopped scrolling and stopped producing: the end of the list. */
+  | "exhausted"
+  /** The page kept scrolling but stopped producing new accounts — X stopped serving us. */
+  | "stalled";
+
+export interface CollectionResult {
+  leads: RawLead[];
+  reason: CollectionStopReason;
+  /** Scroll rounds run. */
+  rounds: number;
+  /** Accounts recognised as already collected by an earlier run and passed over. */
+  skipped: number;
 }
 
 export interface ScrapeSource {

@@ -2,14 +2,28 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { listAccounts } from "../api/accounts";
-import { bulkDeleteScrapes, cancelScrape, deleteScrape, listScrapes } from "../api/scrapes";
+import {
+  bulkDeleteScrapes,
+  cancelScrape,
+  continueScrape,
+  deleteScrape,
+  listScrapes,
+  pauseScrape,
+  resumeScrape,
+} from "../api/scrapes";
 import type { ScrapeJob, ScrapeJobStatus } from "../api/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
 import { SkeletonRows } from "../components/Skeleton";
 import { StatusPill } from "../components/StatusPill";
 import { formatNumber, formatRelative } from "../lib/format";
-import { isCancellableScrape, scrapeDisplayStatus } from "../lib/scrape-status";
+import {
+  isCancellableScrape,
+  isContinuableScrape,
+  isPausableScrape,
+  isResumableScrape,
+  scrapeDisplayStatus,
+} from "../lib/scrape-status";
 
 const STATUS_OPTIONS: ScrapeJobStatus[] = ["queued", "running", "completed", "failed", "paused"];
 
@@ -29,7 +43,12 @@ export function ScrapeJobs() {
     queryFn: () => listScrapes({ status: status || undefined, xAccountId: xAccountId || undefined }),
     refetchInterval: (query) => {
       const jobs = query.state.data?.scrapeJobs ?? [];
-      return jobs.some((j) => j.status === "queued" || j.status === "running") ? 5000 : false;
+      // "paused" is included because a rate-limited job does not stay put: resuming it parks it on
+      // the queue and it starts itself when X's limit lifts, which the list should show without a
+      // manual refresh.
+      return jobs.some((j) => j.status === "queued" || j.status === "running" || j.status === "paused")
+        ? 5000
+        : false;
     },
   });
 
@@ -43,6 +62,28 @@ export function ScrapeJobs() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["scrapes"] });
       setDeleting(null);
+    },
+  });
+
+  // One mutation per action rather than a shared one, so a row's own button can show its own
+  // pending state without every other row's greying out with it.
+  const pauseMutation = useMutation({
+    mutationFn: pauseScrape,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["scrapes"] }),
+  });
+
+  const resumeMutation = useMutation({
+    mutationFn: resumeScrape,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["scrapes"] }),
+  });
+
+  const continueMutation = useMutation({
+    mutationFn: continueScrape,
+    // A continue produces a new run; go and watch it rather than leaving the user on a list where
+    // the new row is one of many.
+    onSuccess: ({ scrapeJob }) => {
+      queryClient.invalidateQueries({ queryKey: ["scrapes"] });
+      navigate(`/scrapes/${scrapeJob.id}`);
     },
   });
 
@@ -227,7 +268,40 @@ export function ScrapeJobs() {
                   <td className="px-3 py-2 text-xs text-zinc-500">
                     {job.finishedAt ? formatRelative(job.finishedAt) : "—"}
                   </td>
-                  <td className="px-3 py-2 text-right" onClick={(event) => event.stopPropagation()}>
+                  <td className="px-3 py-2 text-right whitespace-nowrap" onClick={(event) => event.stopPropagation()}>
+                    {isPausableScrape(job) && (
+                      <button
+                        type="button"
+                        onClick={() => pauseMutation.mutate(job.id)}
+                        disabled={pauseMutation.isPending}
+                        title="Stop this run but keep it resumable"
+                        className="mr-2 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-zinc-50 disabled:opacity-40 dark:hover:bg-zinc-800"
+                      >
+                        Pause
+                      </button>
+                    )}
+                    {isResumableScrape(job) && (
+                      <button
+                        type="button"
+                        onClick={() => resumeMutation.mutate(job.id)}
+                        disabled={resumeMutation.isPending}
+                        title="Carry on from where this stopped, skipping what it already collected"
+                        className="mr-2 rounded-md border px-2.5 py-1 text-xs font-medium text-accent-text hover:bg-zinc-50 disabled:opacity-40 dark:hover:bg-zinc-800"
+                      >
+                        Resume
+                      </button>
+                    )}
+                    {isContinuableScrape(job) && (
+                      <button
+                        type="button"
+                        onClick={() => continueMutation.mutate(job.id)}
+                        disabled={continueMutation.isPending}
+                        title="Run this target again for more leads, skipping every account already collected"
+                        className="mr-2 rounded-md border px-2.5 py-1 text-xs font-medium text-accent-text hover:bg-zinc-50 disabled:opacity-40 dark:hover:bg-zinc-800"
+                      >
+                        Continue
+                      </button>
+                    )}
                     {isCancellableScrape(job) && (
                       <button
                         type="button"

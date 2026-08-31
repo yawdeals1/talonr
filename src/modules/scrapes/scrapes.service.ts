@@ -1,7 +1,7 @@
 import { env } from "../../config/env.js";
 import { normalizeStudioSourceType, toStudioSourceType } from "../../db/source-type-compat.js";
 import { studioDelete, studioGet, studioInsert, studioListSorted, studioUpdate } from "../../db/studio-client.js";
-import type { EngagementType, Lead, ScrapeJob, ScrapeResultFilter, XAccount } from "../../db/schema.js";
+import type { EngagementType, Lead, ScrapeJob, ScrapeResultFilter, SourceType, XAccount } from "../../db/schema.js";
 import { mapWithConcurrency } from "../../lib/concurrency.js";
 import { NotFoundError, ValidationError } from "../../lib/errors.js";
 import { scrapeQueue } from "../../queue/queues.js";
@@ -10,10 +10,14 @@ import { buildFilterPredicate } from "../lead-lists/filter-query-builder.js";
 import { CANCELLED_ERROR_MESSAGE, isCancelledJob } from "./scrape-cancel.js";
 import {
   attachScrapeResultSettings,
+  clearScrapePauseRequest,
+  clearScrapeResumeAt,
   createScrapeResultStore,
   deleteScrapeResultStore,
   getScrapeResultStore,
   requestScrapeFinishRow,
+  requestScrapePauseRow,
+  scrapeResultCapLeads,
   scrapeResultLeadIds,
   updateScrapeResultStoreFilter,
 } from "./scrape-results.service.js";
@@ -25,6 +29,11 @@ export interface CreateScrapeInput {
   engagementTypes?: EngagementType[];
   capLeads?: number;
   resultFilterDefinition?: ScrapeResultFilter;
+  /**
+   * Handles already collected from this target, so a continued run scrolls past them rather than
+   * re-collecting them. Set only by `continueScrapeJob` — never accepted from a request body.
+   */
+  skipHandles?: string[];
 }
 
 // Tie-broken by id so the ordering is total — the Studio API has no ORDER BY, so paged fetches
@@ -39,6 +48,7 @@ export async function createScrapeJob(userId: string, input: CreateScrapeInput) 
     throw new ValidationError(`X account is ${account.status}, cannot trigger a scrape`);
   }
 
+  const capLeads = input.capLeads ?? env.SCRAPE_CAP_LEADS_DEFAULT;
   const storedJob = await studioInsert<ScrapeJob>("scrape_jobs", {
     userId,
     xAccountId: input.xAccountId,
@@ -49,7 +59,12 @@ export async function createScrapeJob(userId: string, input: CreateScrapeInput) 
   const normalizedJob = normalizeStudioSourceType(storedJob);
   let job: ScrapeJob;
   try {
-    const store = await createScrapeResultStore(userId, normalizedJob.id, input.resultFilterDefinition ?? {});
+    const store = await createScrapeResultStore(
+      userId,
+      normalizedJob.id,
+      input.resultFilterDefinition ?? {},
+      capLeads
+    );
     job = attachScrapeResultSettings(normalizedJob, store);
   } catch (error) {
     await studioDelete("scrape_jobs", normalizedJob.id);
@@ -65,13 +80,53 @@ export async function createScrapeJob(userId: string, input: CreateScrapeInput) 
       sourceType: input.sourceType,
       sourceRef: input.sourceRef,
       engagementTypes: input.engagementTypes,
-      capLeads: input.capLeads ?? env.SCRAPE_CAP_LEADS_DEFAULT,
+      capLeads,
       resultFilter: input.resultFilterDefinition,
+      skipHandles: input.skipHandles,
     },
     { jobId: job.id }
   );
 
   return job;
+}
+
+/**
+ * Ceiling on how many already-collected handles a resumed or continued run is told to scroll past.
+ *
+ * Every one of them costs the run a little scrolling and nothing else, so a generous bound is
+ * cheap — but it rides on the BullMQ job payload and is held in memory as a Set for the whole run,
+ * so it is bounded rather than unbounded.
+ */
+const MAX_SKIP_HANDLES = 5000;
+
+/**
+ * The handles this user has already collected from a given target.
+ *
+ * This is what makes "continue" mean *more* leads rather than the same page again. Read from the
+ * leads table by (sourceType, sourceRef) rather than from one job's membership, because the point
+ * is "everything I already have from this target", however many runs it took to get it.
+ */
+async function collectedHandlesFor(userId: string, sourceType: SourceType, sourceRef: string): Promise<string[]> {
+  const leads = await studioListSorted<Lead>(
+    "leads",
+    { filter: { userId, sourceType: toStudioSourceType(sourceType), sourceRef }, cap: MAX_SKIP_HANDLES },
+    (a, b) => a.id.localeCompare(b.id)
+  );
+  return leads.map((lead) => lead.handle.toLowerCase());
+}
+
+/** The cap a job was created with, falling back for jobs that predate it being recorded. */
+async function capLeadsFor(userId: string, scrapeJobId: string): Promise<number> {
+  return scrapeResultCapLeads(await getScrapeResultStore(userId, scrapeJobId)) ?? env.SCRAPE_CAP_LEADS_DEFAULT;
+}
+
+async function requireRunnableAccount(userId: string, xAccountId: string): Promise<XAccount> {
+  const account = await studioGet<XAccount>("x_accounts", xAccountId);
+  if (!account || account.userId !== userId) throw new NotFoundError("X account not found");
+  if (account.status !== "active") {
+    throw new ValidationError(`X account is ${account.status}, cannot run a scrape on it`);
+  }
+  return account;
 }
 
 export interface ListScrapesOptions {
@@ -195,6 +250,157 @@ export async function finishScrapeJobEarly(userId: string, id: string) {
   await requestScrapeFinishRow(userId, id);
   await logActivity(userId, "scrape.finish_requested", { scrapeJobId: id });
   return getScrapeJob(userId, id);
+}
+
+/**
+ * "Stop, but I'm not done with this."
+ *
+ * The third way a run can be stopped, and the only one it survives: a cancel is terminal and a
+ * finish completes the job, while a pause leaves it `paused` with every lead it had and a way back
+ * onto the queue. A queued job never started, so it is simply taken off the queue and parked; a
+ * running one gets a request row the worker notices at its next checkpoint, exactly like "Finish
+ * now" — the same mechanism, a different ending.
+ */
+export async function pauseScrapeJob(userId: string, id: string) {
+  const job = await getScrapeJob(userId, id);
+  if (job.status !== "queued" && job.status !== "running") {
+    throw new ValidationError(
+      job.status === "paused" ? "This scrape is already paused" : `This scrape is already ${job.status}`
+    );
+  }
+
+  if (job.status === "queued") {
+    const bullJob = await scrapeQueue.getJob(id);
+    if (bullJob) {
+      const state = await bullJob.getState();
+      // An active job's lock belongs to the worker holding it — removing it here throws. It also
+      // means the job started between the read above and now, so fall through to the request row,
+      // which is the right signal for a running job anyway.
+      if (state === "waiting" || state === "delayed") await bullJob.remove();
+    }
+    const updated = await studioUpdate<ScrapeJob>("scrape_jobs", id, {
+      status: "paused",
+      errorMessage: "Paused before it started. Resume to put it back on the queue.",
+    });
+    await logActivity(userId, "scrape.paused", { scrapeJobId: id, wasRunning: false });
+    return attachScrapeResultSettings(normalizeStudioSourceType(updated), await getScrapeResultStore(userId, id));
+  }
+
+  await requestScrapePauseRow(userId, id);
+  await logActivity(userId, "scrape.pause_requested", { scrapeJobId: id });
+  return getScrapeJob(userId, id);
+}
+
+/**
+ * Puts a paused scrape back on the queue, carrying on rather than starting over.
+ *
+ * The same job row is reused — its leads, its filter and its membership all stay attached — and the
+ * run is handed every handle already collected from this target so it scrolls past them instead of
+ * spending its budget re-reading profiles that are already on file. That is what makes resuming
+ * worth more than triggering a fresh scrape of the same list.
+ *
+ * Deliberately indifferent to *why* the job was paused. A manual pause, a rate limit, and a daily
+ * quota all leave a job in the same state with the same thing needed from it, and a job resumed
+ * while its account is still resting is not a problem: the worker sees the cooldown and delays the
+ * job until it lifts, which is the behaviour that already makes a throttled scrape self-healing.
+ */
+export async function resumeScrapeJob(userId: string, id: string) {
+  const job = await getScrapeJob(userId, id);
+  if (job.status !== "paused") {
+    throw new ValidationError(
+      job.status === "queued" || job.status === "running"
+        ? "This scrape is already running"
+        : `Only a paused scrape can be resumed — this one is ${job.status}`
+    );
+  }
+  await requireRunnableAccount(userId, job.xAccountId);
+
+  const [capLeads, skipHandles] = await Promise.all([
+    capLeadsFor(userId, id),
+    collectedHandlesFor(userId, job.sourceType, job.sourceRef),
+  ]);
+
+  // The pause request has to go before the job does, or the resumed run reads the row it was
+  // stopped by and pauses itself again at its first checkpoint.
+  await clearScrapePauseRequest(userId, id);
+  await clearScrapeResumeAt(userId, id);
+
+  // BullMQ keeps completed/failed jobs around for a week and refuses a second job with the same
+  // id, so the old one is removed before the new one takes its place. Reusing the id keeps
+  // `scrapeQueue.getJob(job.id)` working for cancel and delete, which both look it up that way.
+  const existing = await scrapeQueue.getJob(id);
+  if (existing) {
+    const state = await existing.getState();
+    if (state === "active") throw new ValidationError("This scrape is still stopping — try again in a few seconds");
+    await existing.remove();
+  }
+
+  const updated = await studioUpdate<ScrapeJob>("scrape_jobs", id, {
+    status: "queued",
+    errorMessage: null,
+    finishedAt: null,
+  });
+
+  await scrapeQueue.add(
+    "scrape",
+    {
+      scrapeJobId: id,
+      userId,
+      xAccountId: job.xAccountId,
+      sourceType: job.sourceType as CreateScrapeInput["sourceType"],
+      sourceRef: job.sourceRef,
+      engagementTypes: job.engagementTypes ?? undefined,
+      capLeads,
+      resultFilter: Object.keys(job.resultFilterDefinition).length > 0 ? job.resultFilterDefinition : undefined,
+      skipHandles,
+    },
+    { jobId: id }
+  );
+
+  await logActivity(userId, "scrape.resumed", { scrapeJobId: id, skipHandles: skipHandles.length });
+  return attachScrapeResultSettings(normalizeStudioSourceType(updated), await getScrapeResultStore(userId, id));
+}
+
+/**
+ * Runs the same target again for more leads, as a new job.
+ *
+ * The counterpart to resume, for a scrape that is over rather than paused: a completed run that
+ * stopped short of its cap, or a cancelled one. It copies the target, the cap and the filter, and
+ * hands the new run every handle already collected from that target, so "continue" produces
+ * another `capLeads` accounts that are actually new instead of the same first page again.
+ *
+ * A new row rather than a reused one because the old job is a finished record — its leads,
+ * membership and result view all belong to the run that produced them, and overwriting that in
+ * place would make a scrape's own results table stop meaning "what this run found".
+ */
+export async function continueScrapeJob(userId: string, id: string) {
+  const job = await getScrapeJob(userId, id);
+  if (job.status === "queued" || job.status === "running") {
+    throw new ValidationError("This scrape is still going — pause or stop it first");
+  }
+  if (job.status === "paused") {
+    throw new ValidationError("This scrape is paused — resume it instead, so it keeps its leads");
+  }
+  if (job.sourceType === "likers") {
+    throw new ValidationError("X made likers private in June 2024, so this scrape can no longer be run");
+  }
+  await requireRunnableAccount(userId, job.xAccountId);
+
+  const [capLeads, skipHandles] = await Promise.all([
+    capLeadsFor(userId, id),
+    collectedHandlesFor(userId, job.sourceType, job.sourceRef),
+  ]);
+
+  return createScrapeJob(userId, {
+    xAccountId: job.xAccountId,
+    sourceType: job.sourceType,
+    sourceRef: job.sourceRef,
+    engagementTypes: job.engagementTypes ?? undefined,
+    capLeads,
+    resultFilterDefinition:
+      Object.keys(job.resultFilterDefinition).length > 0 ? job.resultFilterDefinition : undefined,
+    skipHandles,
+  });
 }
 
 export async function deleteScrapeJob(userId: string, id: string): Promise<void> {

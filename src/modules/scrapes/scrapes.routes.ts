@@ -8,12 +8,15 @@ import { requireAuth } from "../auth/auth.middleware.js";
 import {
   bulkRemove,
   cancel,
+  continueRun,
   create,
   finishEarly,
   get,
   list,
   listLeads,
+  pause,
   remove,
+  resume,
   updateResultFilter,
 } from "./scrapes.controller.js";
 
@@ -39,4 +42,9 @@ scrapesRouter.get("/:id/leads", requireUuidParam("id"), asyncHandler(listLeads))
 scrapesRouter.patch("/:id/result-filter", requireUuidParam("id"), asyncHandler(updateResultFilter));
 scrapesRouter.post("/:id/cancel", requireUuidParam("id"), asyncHandler(cancel));
 scrapesRouter.post("/:id/finish", requireUuidParam("id"), asyncHandler(finishEarly));
+scrapesRouter.post("/:id/pause", requireUuidParam("id"), asyncHandler(pause));
+scrapesRouter.post("/:id/resume", requireUuidParam("id"), asyncHandler(resume));
+// Enqueues a whole new run, so it goes through the same per-user create limiter as POST /scrapes —
+// otherwise "continue" would be an unmetered way to do exactly what that limiter bounds.
+scrapesRouter.post("/:id/continue", createLimiter, requireUuidParam("id"), asyncHandler(continueRun));
 scrapesRouter.delete("/:id", requireUuidParam("id"), asyncHandler(remove));

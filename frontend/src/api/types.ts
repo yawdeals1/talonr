@@ -70,6 +70,16 @@ export interface ScrapeJob {
   resultFilterDefinition: ScrapeResultFilter;
   tracksExactLeads: boolean;
   progress: ScrapeProgress | null;
+  /**
+   * The lead cap this run was asked for. Null for jobs created before it was recorded — the number
+   * lives alongside the filter rather than in a column, so there is nothing to read for those.
+   */
+  capLeads: number | null;
+  /**
+   * When a run paused by X's rate limit may be resumed, ISO. Null for every other kind of pause,
+   * and the thing the job page counts down to instead of printing a raw timestamp.
+   */
+  resumeAt: string | null;
   status: ScrapeJobStatus;
   leadsFound: number;
   errorMessage: string | null;

@@ -353,18 +353,61 @@ column: the durable half of the outcome is the account's own `status`, plus an `
 entry. `banned` accounts are refused outright — that status is only ever set by hand, so it records
 a human decision a probe has no business overturning.
 
-### Stopping a run: cancel vs. finish (`modules/scrapes/scrape-cancel.ts`)
+### Stopping a run: cancel vs. finish vs. pause (`modules/scrapes/scrape-cancel.ts`)
 
-Two different things a user can ask of a run in flight, both answered at the same checkpoints:
+Three different things a user can ask of a run in flight, all answered at the same checkpoints:
 
-- **Cancel** (`POST /scrapes/:id/cancel`) — stop and mark the job cancelled.
+- **Cancel** (`POST /scrapes/:id/cancel`) — stop and mark the job cancelled. Terminal.
 - **Finish now** (`POST /scrapes/:id/finish`) — stop *looking* but let the job complete normally
   with everything it found. Only valid while a job is `running`; a queued job has nothing to wrap
-  up, so it says to cancel instead. The request is a row of its own
-  (`__talonr_scrape_finish__:<jobId>`) rather than a field in the result store, because the store's
-  `filter_definition` is one JSONB column that the running worker rewrites every few seconds for
-  progress — a flag written into it by the API would be clobbered. The API only creates that row;
-  the worker only reads it, and deletes it when the run ends.
+  up, so it says to cancel instead.
+- **Pause** (`POST /scrapes/:id/pause`) — the same stop as "finish", with a different ending: the
+  job goes to `paused` keeping every lead, and can be put back on the queue later. A *queued* job
+  is pulled off the queue and parked directly, since there is no run to signal.
+
+Finish and pause are each a row of their own (`__talonr_scrape_finish__:<jobId>` /
+`__talonr_scrape_pause__:<jobId>`) rather than a field in the result store, because the store's
+`filter_definition` is one JSONB column that the running worker rewrites every few seconds for
+progress — a flag written into it by the API would be clobbered. The API only creates those rows;
+the worker only reads them, and deletes both when the run ends. They are separate rows from each
+other because the two endings differ, and asking for one must never produce the other because a
+shared row was half-written. `createRunCheckpoint` answers `"pause"` in preference to `"finish"`
+when both somehow exist — it is the recoverable ending, so an ambiguous state resolves to the one
+that loses less. The scraper modules know nothing of this: `scrape.worker.ts` translates `"pause"`
+into the `"finish"` they already understand and remembers that it did, so `scroll-collector.ts` and
+`profile-enricher.ts` stay free of any notion of what a job's statuses are.
+
+### Starting one again: resume vs. continue
+
+The counterparts to the stops above, and the difference between them is which job you get back:
+
+- **Resume** (`POST /scrapes/:id/resume`) — puts a **paused** job back on the queue as *the same
+  job*, keeping its leads, its filter and its result membership. Deliberately indifferent to what
+  paused it: a manual pause, X's rate limit, and the account's daily quota all leave a job in the
+  same state needing the same thing. Resuming while the account is still resting is not a problem —
+  the worker sees the cooldown and delays the job until it lifts, which is the same self-healing
+  path a throttled scrape already took.
+- **Continue** (`POST /scrapes/:id/continue`) — for a job that is **over** (`completed`, or `failed`
+  including a cancel): creates a **new** job with the same target, cap and filter. A new row rather
+  than a reused one, because the old job is a finished record — its leads, membership and result
+  view all belong to the run that produced them, and overwriting that in place would make a
+  scrape's own results table stop meaning "what this run found". It goes through the same per-user
+  create limiter as `POST /scrapes`, since it enqueues exactly the same kind of work.
+
+**Both hand the new run the handles already collected from that target** (`ScrapeJobData`'s
+`skipHandles`, read from `leads` by `(sourceType, sourceRef)` and capped at 5,000). The collector
+recognises them while scrolling and neither counts them toward `capLeads` nor passes them to the
+profile pass, so "continue" means another `capLeads` accounts that are actually **new** rather than
+the same first page again — the expensive half of a scrape is one page load per profile, and
+re-reading profiles already on file is the whole cost with none of the benefit. Seeing a skipped
+handle still counts as *progress* for the stagnation check: a continued run spends its first rounds
+doing nothing but scrolling past what it already has, and counting those rounds stagnant would end
+it before it ever reached a new account.
+
+The cap a job was created with is needed to resume or continue it, and `scrape_jobs` has no column
+for it — so it is recorded as `capLeads` in the same internal `lead_lists` record as the filter and
+the progress, and surfaced on the job as `capLeads` (null for jobs that predate it). Reading it off
+the BullMQ job instead would not survive `removeOnComplete`'s seven days.
 
 ### A run also stops on the clock (`SCRAPE_MAX_RUN_MINUTES`)
 
@@ -409,14 +452,35 @@ figure that would go stale on any deploy that overrides it.
   bound (see `buildFilterPredicate`) that every un-enriched lead passes. Gating it correctly also
   fixed "Finish now" mid-enrichment silently throwing away the rest of the collected list.
 - A run the clock cut short records a note on the **completed** job (`errorMessage`, rendered as a
-  note rather than an error in `ScrapeJobDetail.tsx`), built by
-  `scrape-cancel.ts#describeRunLimitStop`. It covers two disappointments the saved count hides:
-  fewer leads than asked for, *and* leads saved with no profile details behind them. The second is
-  why the note can't be gated on `leadsFound < capLeads` — an unfiltered run keeps everything it
-  collected, so a clock that beat the profile pass still reports a full `capLeads` while most of
-  those rows have no follower count and are invisible to every follower-range filter.
-  `isCancelledJob` still only matches `failed` + the exact cancel message, so the two encodings
-  don't collide.
+  note rather than an error in `ScrapeJobDetail.tsx`) — see "A short run says why" below, which
+  covers the clock alongside every other bound. `isCancelledJob` still only matches `failed` + the
+  exact cancel message, so the two encodings don't collide.
+
+### A short run says why (`scrape-cancel.ts#describeScrapeOutcome`)
+
+**Every bound that can end a run short now names itself on the finished job.** The clock used to be
+the only one that did, so a followers scrape asked for 100 that read five accounts off the list and
+stopped came back `completed`, green, with no message anywhere — indistinguishable from a target
+that genuinely only had five, and giving nothing to act on. `describeScrapeOutcome` composes the
+note from what the run actually did:
+
+- **the list stopped producing**, and which kind: `"exhausted"` (the page would not scroll or grow
+  any further — the end of the list, so there is nothing more to get) versus `"stalled"` (the page
+  kept scrolling but returned no new accounts — X declining to serve more, so running it again
+  later is worth doing). Same symptom, opposite advice;
+- **verified-only** dropping candidates before the profile pass, which is invisible in the saved
+  count because it happens before a single profile is visited;
+- **the filter** matching fewer of the profiles read than were asked for ("100 profiles checked,
+  4 matched your filter");
+- **already-collected accounts** a resumed/continued run scrolled past;
+- **the clock**, beating either the cap or the profile pass.
+
+Deliberately not gated on `leadsFound < capLeads`: a run can hit its full count and still owe an
+explanation, because leads saved off the list with no profile behind them have no follower count
+and are invisible to every range filter. `scrollAndCollect` returns a `CollectionResult`
+(`{leads, reason, rounds, skipped}`) rather than a bare array so the worker has the "why" to pass
+in; the round count rides into the `scrape.completed` activity log, where it separates "one round
+and done" (the scroll never landed) from "forty rounds that each returned the same cells".
 
 ### Cancelling a run
 
@@ -555,6 +619,43 @@ stay free of env imports.
   vs. "List page never rendered" — because they point at different things (the worker's network or
   proxy vs. the page itself).
 
+### Advancing the list is measured, not assumed (`scroll-collector.ts`)
+
+**A scroll is verified to have landed, and a round waits for X to answer it.** Two bugs lived here,
+both of which ended a run early and silently:
+
+- **A wheel event is a request, not a guarantee.** Playwright's mouse starts at (0, 0) — inside X's
+  fixed header, not the timeline — so the pointer is moved into the primary column first. But that
+  fixes only that one cause, and a fire-and-forget scroll has nothing to say when it doesn't land:
+  the run re-reads one viewport until the stagnation counter ends it. `advanceTimeline` now reads
+  the scroll position before and after (`readTimelineState`, run in-page, resolving whichever
+  element actually scrolls rather than assuming the window) and escalates until it moves: wheel →
+  scrolling the resolved element from inside the page, falling back to `scrollIntoView` on the last
+  rendered cell → `keyboard.press("End")`. `hasMoved` reads immediately and only *then* polls for
+  ~600ms, because `mouse.wheel` resolves when the event is dispatched, not when the scrolling it
+  causes has finished — measuring instantly would report a false stall and fire the next escalation
+  on top of a scroll already in flight, jumping several viewports and skipping the cells being read.
+- **The polite delay was doing a job it was never sized for.** The loop slept 1.5–4s
+  (`SCROLL_DELAY_MIN_MS`/`MAX`) and extracted whatever happened to be there. That interval is scrape
+  politeness, not a bound on a network fetch, and X's followers endpoint regularly takes longer —
+  so a round was counted stagnant because the next page was still in flight, four of those in a row
+  ended the run, and the whole thing took twelve seconds and reported success. A round now waits up
+  to `MAX_CONTENT_WAIT_MS` (12s, overridable per-run via `ScrapeSourceContext.contentWaitMs`) for
+  the timeline to actually change — cell count, last cell, or scroll height — and *then* takes the
+  polite delay. It waits for X; it never scrapes faster than the configured pace.
+
+`MAX_STAGNANT_ROUNDS` is 6 rather than 4 on the back of that: a stagnant round now means "nothing
+arrived in twelve seconds", not "nothing arrived in the two-second nap I took". A page that will not
+move at all short-circuits straight to the limit instead — there is no point spending the run's
+clock re-reading a viewport that is never going to change — and reports `"exhausted"` rather than
+`"stalled"`.
+
+`user-cell.parser.ts` also no longer requires `a[role="link"]` on a cell's profile anchor. The role
+is a presentational detail of one React component while the path shape (`/^\/[A-Za-z0-9_]{1,15}$/`)
+is the real test, so requiring it meant a markup change on X's side would silently drop every cell
+it touched — which from the outside looks exactly like a followers list that ran dry. Anchors inside
+`UserDescription` are excluded, since a bio's @mentions are handle-shaped links to somebody else.
+
 A run cut short still keeps its work: `scrollAndCollect` attaches whatever it collected to the
 thrown error (`attachPartialLeads`/`getPartialLeads` in `scraper/types.ts`; `engagers` passes one
 shared `into` map across both strategies so the first one's leads survive a failure in the second),
@@ -596,6 +697,9 @@ All routes prefixed `/api`, JSON body/response. Auth column: `public`, `auth` (`
 | GET | /scrapes | auth | List own jobs, filterable by `status`/`xAccountId` |
 | GET | /scrapes/:id | auth | Job detail/status |
 | POST | /scrapes/:id/finish | auth | Ask a **running** scrape to stop looking and complete with what it has already found (not a cancel — the job ends as `completed`) |
+| POST | /scrapes/:id/pause | auth | Pauses a queued **or running** scrape — it stops at its next checkpoint keeping every lead, and can be resumed later |
+| POST | /scrapes/:id/resume | auth | Puts a **paused** scrape back on the queue as the same job, skipping the accounts already collected from that target. Works whatever paused it: you, a rate limit, or the daily quota |
+| POST | /scrapes/:id/continue | auth | Runs a **finished** scrape's target again as a **new** job with the same cap and filter, skipping every account already collected from it — rate-limited per user, like `POST /scrapes` |
 | POST | /scrapes/:id/cancel | auth | Cancels a queued **or running** scrape — removes a not-yet-started job from the queue, and marks a running one cancelled so the worker stops at its next checkpoint and saves what it collected |
 | DELETE | /scrapes/:id | auth | Deletes a non-running scrape record/queue entry; collected leads remain saved |
 | GET | /leads | auth | Paginated own leads, filterable by `handle`/`sourceType`/`sourceRef`/`minFollowers`/`maxFollowers`/`location`; returns the full matched `total` alongside the page |

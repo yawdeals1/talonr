@@ -3,10 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const studio = vi.hoisted(() => ({ studioGet: vi.fn() }));
 vi.mock("../../db/studio-client.js", () => studio);
 
-const results = vi.hoisted(() => ({ isScrapeFinishRequested: vi.fn() }));
+const results = vi.hoisted(() => ({ isScrapeFinishRequested: vi.fn(), isScrapePauseRequested: vi.fn() }));
 vi.mock("./scrape-results.service.js", () => results);
 
-const { CANCELLED_ERROR_MESSAGE, createRunCheckpoint, describeRunLimitStop, isCancelledJob, withRunDeadline } =
+const { CANCELLED_ERROR_MESSAGE, createRunCheckpoint, describeScrapeOutcome, isCancelledJob, withRunDeadline } =
   await import("./scrape-cancel.js");
 const { ScrapeCancelledError } = await import("../../scraper/types.js");
 
@@ -18,6 +18,7 @@ const checkpointFor = () => createRunCheckpoint("user-1", "job-1");
 beforeEach(() => {
   vi.clearAllMocks();
   results.isScrapeFinishRequested.mockResolvedValue(false);
+  results.isScrapePauseRequested.mockResolvedValue(false);
 });
 
 describe("isCancelledJob", () => {
@@ -69,6 +70,27 @@ describe("createRunCheckpoint", () => {
     studio.studioGet.mockResolvedValue(cancelledJob);
     results.isScrapeFinishRequested.mockResolvedValue(true);
     await expect(checkpointFor()()).rejects.toBeInstanceOf(ScrapeCancelledError);
+  });
+
+  it("reports a pause request, which stops the run without ending the job", async () => {
+    // The third way a run can stop: the leads are kept exactly as "Finish now" keeps them, but the
+    // job stays resumable rather than completing.
+    studio.studioGet.mockResolvedValue(runningJob);
+    results.isScrapePauseRequested.mockResolvedValue(true);
+
+    const checkpoint = checkpointFor();
+    await expect(checkpoint()).resolves.toBe("pause");
+    await expect(checkpoint()).resolves.toBe("pause");
+    expect(studio.studioGet).toHaveBeenCalledTimes(1);
+  });
+
+  it("prefers a pause over a finish when both rows somehow exist", async () => {
+    // Pause is the recoverable ending, so an ambiguous state resolves to the one that loses less.
+    studio.studioGet.mockResolvedValue(runningJob);
+    results.isScrapePauseRequested.mockResolvedValue(true);
+    results.isScrapeFinishRequested.mockResolvedValue(true);
+
+    await expect(checkpointFor()()).resolves.toBe("pause");
   });
 
   it("throttles reads so a long run doesn't poll on every scroll round", async () => {
@@ -134,32 +156,129 @@ describe("withRunDeadline", () => {
   });
 });
 
-describe("describeRunLimitStop", () => {
-  const base = { budgetMinutes: 20, leadsFound: 20, capLeads: 20, unenriched: 0 };
+describe("describeScrapeOutcome", () => {
+  const base = {
+    capLeads: 20,
+    leadsFound: 20,
+    collected: 20,
+    checked: 20,
+    droppedUnverified: 0,
+    skipped: 0,
+    collectionReason: "cap" as const,
+    filtered: false,
+    timedOut: false,
+    budgetMinutes: 20,
+    unenriched: 0,
+  };
 
-  it("says nothing when the clock cost the run nothing", () => {
-    expect(describeRunLimitStop(base)).toBeNull();
+  it("says nothing when the run delivered what it was asked for", () => {
+    expect(describeScrapeOutcome(base)).toBeNull();
   });
 
-  it("reports a run that ran out of time before it hit the cap", () => {
-    const note = describeRunLimitStop({ ...base, leadsFound: 6 });
-    expect(note).toContain("6 of the 20 leads requested");
+  it("names the end of the list, which used to complete green and silent", () => {
+    // The failure this whole function exists for: a followers scrape asked for 100 that read five
+    // accounts and stopped said nothing at all, so there was no way to tell it from a target that
+    // genuinely only had five.
+    const note = describeScrapeOutcome({
+      ...base,
+      leadsFound: 5,
+      collected: 5,
+      checked: 5,
+      collectionReason: "exhausted",
+    });
+
+    expect(note).toContain("Reached the end of the list after 5 accounts");
+    expect(note).toContain("5 leads");
+  });
+
+  it("distinguishes X refusing to serve more from the list having ended", () => {
+    const note = describeScrapeOutcome({
+      ...base,
+      leadsFound: 5,
+      collected: 40,
+      checked: 5,
+      collectionReason: "stalled",
+    });
+
+    expect(note).toContain("X stopped serving more of the list after 40 accounts");
+    expect(note).toContain("Run it again later");
+  });
+
+  it("reports the verified-only drop, which happens before a single profile is visited", () => {
+    const note = describeScrapeOutcome({
+      ...base,
+      leadsFound: 3,
+      collected: 120,
+      checked: 3,
+      droppedUnverified: 117,
+      filtered: true,
+      collectionReason: "cap",
+    });
+
+    expect(note).toContain("117 collected accounts were not verified");
+  });
+
+  it("separates profiles checked from leads matched on a filtered run", () => {
+    const note = describeScrapeOutcome({
+      ...base,
+      leadsFound: 4,
+      collected: 100,
+      checked: 100,
+      filtered: true,
+    });
+
+    expect(note).toContain("100 profiles checked, 4 matched your filter");
+  });
+
+  it("says what a continued run scrolled past", () => {
+    const note = describeScrapeOutcome({
+      ...base,
+      leadsFound: 2,
+      collected: 2,
+      checked: 2,
+      skipped: 340,
+      collectionReason: "exhausted",
+    });
+
+    expect(note).toContain("340 accounts already collected by an earlier run");
+  });
+
+  it("still reports the clock when that is what stopped the run", () => {
+    const note = describeScrapeOutcome({ ...base, leadsFound: 6, timedOut: true });
     expect(note).toContain("20-minute run limit");
+    expect(note).toContain("6 leads of the 20 requested");
   });
 
   it("reports leads saved without profile details even when the count looks complete", () => {
     // The case the saved count hides: an unfiltered run keeps everything it collected, so a clock
     // that beat the profile pass still reports a full cap — while most of those rows have no
     // follower count and are invisible to every follower-range filter.
-    const note = describeRunLimitStop({ ...base, leadsFound: 1000, capLeads: 1000, unenriched: 850 });
+    const note = describeScrapeOutcome({
+      ...base,
+      capLeads: 1000,
+      leadsFound: 1000,
+      collected: 1000,
+      checked: 150,
+      unenriched: 850,
+      timedOut: true,
+    });
+
     expect(note).not.toBeNull();
-    expect(note).toContain("850 of them");
+    expect(note).toContain("850 leads were saved straight off the list");
     expect(note).toContain("no follower count or location");
   });
 
   it("does not read as though one lead were several", () => {
-    expect(describeRunLimitStop({ ...base, leadsFound: 1, capLeads: 1, unenriched: 1 })).toContain(
-      "1 lead saved, 1 of it"
-    );
+    const note = describeScrapeOutcome({
+      ...base,
+      capLeads: 1,
+      leadsFound: 1,
+      collected: 1,
+      checked: 1,
+      unenriched: 1,
+      timedOut: true,
+    });
+
+    expect(note).toContain("1 lead was saved straight off the list");
   });
 });

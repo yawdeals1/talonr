@@ -64,9 +64,26 @@ export async function extractUserCells(
         if (inSuggestionModule(cell)) return null;
 
         const handleEl = cell.querySelector('a[href^="/"] span');
-        const links = Array.from(cell.querySelectorAll('a[role="link"]')) as HTMLAnchorElement[];
-        const profileLink = links.find((a) => /^\/[A-Za-z0-9_]{1,15}$/.test(new URL(a.href).pathname));
-        const handle = profileLink ? profileLink.pathname.slice(1) : null;
+        // Every anchor in the cell, not only the ones carrying role="link". X does put that role on
+        // its profile anchors today, but the attribute is a presentational detail of one React
+        // component, and requiring it means a markup change silently drops every cell it touches —
+        // which looks from the outside exactly like a followers list that ran dry. The path shape
+        // below is the real test of "is this a profile link", so the role adds nothing but a way to
+        // fail. Anything without a parseable href is skipped rather than thrown on.
+        const links = (Array.from(cell.querySelectorAll("a[href]")) as HTMLAnchorElement[]).filter(
+          // A bio's @mentions are handle-shaped links to somebody else entirely. They sit below the
+          // cell's own avatar/name anchors so they were never reached first, but excluding them
+          // outright means that stays true even if X reorders the cell.
+          (anchor) => !anchor.closest('[data-testid="UserDescription"]')
+        );
+        const profileLink = links.find((anchor) => {
+          try {
+            return /^\/[A-Za-z0-9_]{1,15}$/.test(new URL(anchor.href, document.baseURI).pathname);
+          } catch {
+            return false;
+          }
+        });
+        const handle = profileLink ? new URL(profileLink.href, document.baseURI).pathname.slice(1) : null;
         if (!handle) return null;
         if (excludedSet.has(handle.toLowerCase())) return null;
 

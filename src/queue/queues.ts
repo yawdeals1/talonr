@@ -18,6 +18,15 @@ export interface ScrapeJobData {
    * enqueued before this existed simply don't have it.
    */
   resultFilter?: ScrapeResultFilter;
+  /**
+   * Handles an earlier run already collected from this target, lowercased.
+   *
+   * Set when a job is resumed or continued. The collector recognises these while scrolling and
+   * neither counts them toward the cap nor hands them on for a profile visit, so a continued run
+   * costs one cheap scroll past what is already on file and then spends its whole budget on
+   * accounts that are actually new.
+   */
+  skipHandles?: string[];
 }
 
 export const SCRAPE_QUEUE_NAME = "scrape";
